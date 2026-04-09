@@ -1,0 +1,12 @@
+package com.example.dns;
+
+import com.vaadin.flow.component.dependency.StyleSheet;
+import com.vaadin.flow.component.page.AppShellConfigurator;
+import com.vaadin.flow.component.page.Push;
+import com.vaadin.flow.theme.aura.Aura;
+
+@StyleSheet(Aura.STYLESHEET)
+@Push
+public class AppShell implements AppShellConfigurator {
+
+}

@@ -88,6 +88,111 @@ class DnsViewTest {
         assertTrue(totalRunners > 0, "Should have runner cards in slots");
     }
 
+    // --- Lazy loading ---
+
+    @Test
+    void initiallyOnlyFirstSlotsAreMaterialized() {
+        DnsView view = navigateToDns();
+
+        var slots = view.getSlotsByTime().values().stream().toList();
+        assertTrue(slots.size() > 10, "Test needs more than 10 time slots");
+
+        long materializedCount = slots.stream()
+                .filter(StartTimeSlot::isMaterialized)
+                .count();
+
+        assertEquals(10, materializedCount,
+                "Only first 10 slots should be materialized initially");
+
+        // Later slots should have no runner cards yet
+        assertFalse(slots.getLast().isMaterialized(),
+                "Last slot should not be materialized");
+        assertTrue(slots.getLast().getRunnerCards().isEmpty(),
+                "Non-materialized slot should have no runner cards");
+    }
+
+    @Test
+    void scrollEventMaterializesMoreSlots() {
+        DnsView view = navigateToDns();
+
+        var slots = view.getSlotsByTime().values().stream().toList();
+        long initialMaterialized = slots.stream()
+                .filter(StartTimeSlot::isMaterialized).count();
+
+        // Simulate scroll to slot index 12 (beyond initial 10)
+        view.onVisibleSlotChanged(12);
+
+        long afterScrollMaterialized = slots.stream()
+                .filter(StartTimeSlot::isMaterialized).count();
+
+        assertTrue(afterScrollMaterialized > initialMaterialized,
+                "Scrolling should materialize more slots");
+        assertTrue(slots.get(12).isMaterialized(),
+                "Slot at scroll position should be materialized");
+    }
+
+    @Test
+    void filtersAppliedToNewlyMaterializedSlots() {
+        DnsView view = navigateToDns();
+
+        // Mark a runner in first slot as started
+        RunnerCard firstCard = view.getSlotsByTime().values().iterator().next()
+                .getRunnerCards().getFirst();
+        view.onCardClicked(firstCard);
+
+        // Set filter to show only started
+        view.applyFilters(Set.of(), "", "", true, false);
+
+        // Scroll to materialize more slots
+        view.onVisibleSlotChanged(12);
+
+        // Newly materialized slots should have filter applied:
+        // all non-started cards should be hidden
+        var slots = view.getSlotsByTime().values().stream().toList();
+        for (int i = 10; i < Math.min(22, slots.size()); i++) {
+            var slot = slots.get(i);
+            if (slot.isMaterialized()) {
+                for (RunnerCard card : slot.getRunnerCards()) {
+                    if (!card.isStarted()) {
+                        assertFalse(card.isVisible(),
+                                "Non-started card in newly materialized slot should be hidden when filter is active");
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void textSearchMaterializesAllSlots() {
+        DnsView view = navigateToDns();
+
+        var slots = view.getSlotsByTime().values().stream().toList();
+        assertTrue(slots.size() > 10, "Test needs more than 10 slots");
+
+        // Name search should force all slots to materialize
+        view.applyFilters(Set.of(), "someNameSearch", "", true, true);
+
+        long materializedCount = slots.stream()
+                .filter(StartTimeSlot::isMaterialized).count();
+
+        assertEquals(slots.size(), materializedCount,
+                "Text search should materialize all slots");
+    }
+
+    @Test
+    void scrollToTimeMaterializesTargetSlots() {
+        DnsView view = navigateToDns();
+
+        var slots = view.getSlotsByTime().values().stream().toList();
+        // Pick a late time that is beyond initial materialization
+        var lateSlot = slots.get(slots.size() - 1);
+
+        view.scrollToTime(lateSlot.getStartTime());
+
+        assertTrue(lateSlot.isMaterialized(),
+                "scrollToTime should materialize the target slot");
+    }
+
     // --- Filtering ---
 
     @Test

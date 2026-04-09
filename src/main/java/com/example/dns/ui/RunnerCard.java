@@ -17,6 +17,7 @@ import org.orienteering.datastandard._3.PersonStart;
 import org.vaadin.firitin.components.popover.PopoverButton;
 import org.vaadin.firitin.layouts.HorizontalFloatLayout;
 
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
@@ -29,18 +30,20 @@ public class RunnerCard extends Card {
     private final int bibNumber;
     private final String startPlace;
     private final LocalTime startTime;
+    private final LocalDateTime startDateTime;
     private final String competitionId;
     private final DnsService dnsService;
     private boolean started;
 
     public RunnerCard(PersonStart personStart, String className, int bibNumber,
-                      String startPlace, LocalTime startTime,
+                      String startPlace, LocalTime startTime, LocalDateTime startDateTime,
                       String competitionId, DnsService dnsService) {
         this.personStart = personStart;
         this.className = className;
         this.bibNumber = bibNumber;
         this.startPlace = startPlace != null ? startPlace : "";
         this.startTime = startTime;
+        this.startDateTime = startDateTime;
         this.competitionId = competitionId;
         this.dnsService = dnsService;
 
@@ -145,11 +148,11 @@ public class RunnerCard extends Card {
 
     public void updateAppearance() {
         if (started) {
-            getStyle().setBackground("#e8f5e9");
-        } else if (startTime != null && LocalTime.now().isAfter(startTime)) {
-            getStyle().setBackground("#fff3e0");
+            removeClassName("not-started");
+            addClassName("started");
         } else {
-            getStyle().setBackground("white");
+            removeClassName("started");
+            addClassName("not-started");
         }
     }
 

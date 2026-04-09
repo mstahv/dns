@@ -11,12 +11,15 @@ import com.vaadin.flow.router.BeforeEvent;
 import com.vaadin.flow.router.HasUrlParameter;
 import com.vaadin.flow.router.Route;
 import org.orienteering.datastandard._3.StartList;
-import org.vaadin.firitin.util.VStyleUtil;
+import org.vaadin.firitin.util.IntersectionObserver;
 
 import javax.xml.datatype.XMLGregorianCalendar;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -26,14 +29,18 @@ import java.util.TreeSet;
 public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
 
     static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+    private static final int INITIAL_SLOTS = 10;
 
     private final TulospalveluService tulospalveluService;
     private final DnsService dnsService;
     private final UserSession userSession;
     private final Map<LocalTime, StartTimeSlot> slotsByTime = new LinkedHashMap<>();
+    private final List<StartTimeSlot> slotList = new ArrayList<>();
     private final Set<String> allStartPlaces = new TreeSet<>();
 
     private String competitionId;
+    private Set<Integer> startedBibs;
+    private int materializedCount;
     private Set<String> selectedStartPlaces = Set.of();
     private String nameFilter = "";
     private String numberFilter = "";
@@ -54,7 +61,9 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
         this.competitionId = competitionId;
         removeAll();
         slotsByTime.clear();
+        slotList.clear();
         allStartPlaces.clear();
+        materializedCount = 0;
 
         add(new H1("DNS - " + competitionId));
 
@@ -63,7 +72,7 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
             return;
         }
 
-        Set<Integer> startedBibs = dnsService.getStartedBibs(competitionId);
+        startedBibs = dnsService.getStartedBibs(competitionId);
 
         var sortedTimes = new TreeMap<LocalTime, StartTimeSlot>();
         for (var classStart : startList.getClassStart()) {
@@ -98,28 +107,55 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
                     int bib = parseBibNumber(raceStart.getBibNumber());
                     var slot = sortedTimes.get(time);
                     if (slot != null) {
-                        var card = new RunnerCard(personStart, className, bib, startPlace, time, competitionId, dnsService);
-                        if (startedBibs.contains(bib)) {
-                            card.setStarted(true);
-                        }
-                        card.addCardClickListener(this::onCardClicked);
-                        slot.addRunner(card);
+                        slot.addPendingRunner(personStart, className, bib, startPlace,
+                                toLocalDateTime(raceStart.getStartTime()));
                     }
                 }
             }
         }
 
         slotsByTime.putAll(sortedTimes);
-        slotsByTime.values().forEach(StartTimeSlot::sortRunners);
-        slotsByTime.values().forEach(this::add);
+        slotList.addAll(sortedTimes.values());
+        slotList.forEach(this::add);
+
+        // Materialize first batch immediately
+        materializeMore(INITIAL_SLOTS);
+    }
+
+    private void materializeMore(int targetTotal) {
+        int end = Math.min(targetTotal, slotList.size());
+        int previousCount = materializedCount;
+        for (int i = materializedCount; i < end; i++) {
+            slotList.get(i).materialize(competitionId, dnsService, startedBibs,
+                    this::onCardClicked);
+        }
+        materializedCount = Math.max(materializedCount, end);
+
+        for (int i = previousCount; i < materializedCount; i++) {
+            applyFiltersToSlot(slotList.get(i));
+        }
+    }
+
+    private void applyFiltersToSlot(StartTimeSlot slot) {
+        if (!slot.isMaterialized()) {
+            return;
+        }
+        for (RunnerCard card : slot.getRunnerCards()) {
+            card.setVisible(matchesRunner(card));
+        }
+    }
+
+    private void ensureMaterializedFrom(int fromIndex) {
+        int target = Math.min(fromIndex + INITIAL_SLOTS, slotList.size());
+        if (target > materializedCount) {
+            materializeMore(target);
+        }
     }
 
     void onCardClicked(RunnerCard card) {
-        // Check server-side state for concurrency
         boolean serverStarted = dnsService.isStarted(competitionId, card.getBibNumber());
 
         if (serverStarted) {
-            // Sync UI if out of date
             card.setStarted(true);
 
             var dialog = new ConfirmDialog(
@@ -144,6 +180,26 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
     protected void onAttach(AttachEvent attachEvent) {
         super.onAttach(attachEvent);
         findAncestor(TopLayout.class).initFilters(this);
+        observeUnmaterializedSlots();
+    }
+
+    private void observeUnmaterializedSlots() {
+        var observer = IntersectionObserver.get();
+        for (int i = materializedCount; i < slotList.size(); i++) {
+            var slot = slotList.get(i);
+            int index = i;
+            observer.observe(slot, entry -> {
+                if (entry.isIntersecting()) {
+                    ensureMaterializedFrom(index);
+                    observer.unobserve(slot);
+                }
+            });
+        }
+    }
+
+    // Exposed for tests
+    void onVisibleSlotChanged(int slotIndex) {
+        ensureMaterializedFrom(slotIndex);
     }
 
     public Map<LocalTime, StartTimeSlot> getSlotsByTime() {
@@ -151,16 +207,21 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
     }
 
     void scrollToTime(LocalTime time) {
-        // Find the closest slot at or after the requested time
-        var slot = slotsByTime.get(time);
+        StartTimeSlot slot = slotsByTime.get(time);
+        int targetIndex = -1;
         if (slot == null) {
-            slot = slotsByTime.entrySet().stream()
-                    .filter(e -> !e.getKey().isBefore(time))
-                    .map(Map.Entry::getValue)
-                    .findFirst()
-                    .orElse(null);
+            for (int i = 0; i < slotList.size(); i++) {
+                if (!slotList.get(i).getStartTime().isBefore(time)) {
+                    slot = slotList.get(i);
+                    targetIndex = i;
+                    break;
+                }
+            }
+        } else {
+            targetIndex = slotList.indexOf(slot);
         }
         if (slot != null) {
+            ensureMaterializedFrom(targetIndex);
             slot.scrollIntoView();
         }
     }
@@ -177,19 +238,13 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
         this.showStarted = showStarted;
         this.showNotStarted = showNotStarted;
 
-        for (var entry : slotsByTime.entrySet()) {
-            StartTimeSlot slot = entry.getValue();
+        // Text search needs all slots materialized
+        if (!nameFilter.isEmpty() || !numberFilter.isEmpty()) {
+            materializeMore(slotList.size());
+        }
 
-            boolean anyRunnerVisible = false;
-            for (RunnerCard card : slot.getRunnerCards()) {
-                boolean visible = matchesRunner(card);
-                card.setVisible(visible);
-                if (visible) {
-                    anyRunnerVisible = true;
-                }
-            }
-
-            slot.setVisible(anyRunnerVisible);
+        for (StartTimeSlot slot : slotList) {
+            applyFiltersToSlot(slot);
         }
     }
 
@@ -223,6 +278,15 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
             return null;
         }
         return LocalTime.of(cal.getHour(), cal.getMinute(), cal.getSecond());
+    }
+
+    private static LocalDateTime toLocalDateTime(XMLGregorianCalendar cal) {
+        if (cal == null) {
+            return null;
+        }
+        return LocalDateTime.of(
+                cal.getYear(), cal.getMonth(), cal.getDay(),
+                cal.getHour(), cal.getMinute(), cal.getSecond());
     }
 
     private static int parseBibNumber(String bib) {

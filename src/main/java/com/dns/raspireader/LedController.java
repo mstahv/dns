@@ -18,7 +18,8 @@ public class LedController {
 
     static final int GREEN_GPIO_PIN = 17;
     static final int RED_GPIO_PIN = 27;
-    private static final long BLINK_INTERVAL_MS = 200;
+    private static final long BLINK_INTERVAL_MS = 400;
+    private static final long FAST_BLINK_INTERVAL_MS = 150;
     private static final long BLINK_DURATION_MS = 1000;
 
     private final DigitalOutput greenLed;
@@ -65,11 +66,11 @@ public class LedController {
         stopTask = scheduler.schedule(this::stopBlinking, BLINK_DURATION_MS, TimeUnit.MILLISECONDS);
     }
 
-    /** Start time already passed: green blinks at double speed — runner is late */
+    /** Start time already passed: green blinks 4x speed — runner is late */
     public synchronized void blinkGreenFast() {
         stopBlinking();
         redLed.low();
-        blinkTask = scheduler.scheduleAtFixedRate(greenLed::toggle, 0, BLINK_INTERVAL_MS / 2, TimeUnit.MILLISECONDS);
+        blinkTask = scheduler.scheduleAtFixedRate(greenLed::toggle, 0, FAST_BLINK_INTERVAL_MS, TimeUnit.MILLISECONDS);
         stopTask = scheduler.schedule(this::stopBlinking, BLINK_DURATION_MS, TimeUnit.MILLISECONDS);
     }
 

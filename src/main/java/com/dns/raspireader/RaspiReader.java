@@ -5,12 +5,14 @@ import com.pi4j.Pi4J;
 import com.pi4j.context.Context;
 
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.LocalTime;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
  * Main application: reads Emit 250 cards via serial port, signals via LED,
- * buffers unique card numbers, logs all reads, and pushes to REST endpoint.
+ * caches startlist locally for instant feedback, and communicates via WebSocket.
  */
 public class RaspiReader {
 
@@ -21,10 +23,11 @@ public class RaspiReader {
     private static final int STOP_BITS = SerialPort.TWO_STOP_BITS;
     private static final int PARITY = SerialPort.NO_PARITY;
 
+    // Track last displayed card so server response callback can override LEDs
+    private static volatile int lastDisplayedCard = -1;
 
     public static void main(String[] args) {
         String baseUrl = "http://m4m.local:8080";
-        String password = "";
         String machineId = getMachineId();
         String serialDevice = "";
         String logPath = "/var/log/raspireader/reads.log";
@@ -33,7 +36,6 @@ public class RaspiReader {
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
                 case "--url" -> baseUrl = args[++i];
-                case "--password" -> password = args[++i];
                 case "--machine-id" -> machineId = args[++i];
                 case "--serial" -> serialDevice = args[++i];
                 case "--log" -> logPath = args[++i];
@@ -78,13 +80,45 @@ public class RaspiReader {
             LOG.warning("Onboard ACT LED not available: " + e.getMessage());
         }
 
+        StartlistCache startlistCache = new StartlistCache();
         CardBuffer buffer = new CardBuffer();
         ReadLogger readLogger = new ReadLogger(Path.of(logPath));
-        RestSender sender = new RestSender(baseUrl, password, machineId);
         Emit250Protocol protocol = new Emit250Protocol();
 
         final LedController ledRef = led;
         final OnboardLed onboardLedRef = onboardLed;
+
+        // Derive WebSocket URL from base URL
+        String wsUrl = baseUrl.replaceFirst("^http", "ws") + "/ws/machine-reading";
+
+        // Server response callback — may override LED if it disagrees with cache
+        MachineWebSocket ws = new MachineWebSocket(wsUrl, machineId, startlistCache,
+                response -> {
+                    int displayedCard = lastDisplayedCard;
+                    if (displayedCard < 0 || ledRef == null) return;
+
+                    // Look up what the cache said for this card
+                    var cached = startlistCache.lookup(displayedCard);
+                    boolean cacheFoundIt = cached != null;
+
+                    // If server disagrees with cache, override LEDs
+                    if (response.found() && !cacheFoundIt) {
+                        // Cache missed but server found it — show found pattern
+                        showFoundLed(ledRef, response.startTime());
+                    } else if (!response.found() && cacheFoundIt) {
+                        // Cache had it but server says not found (emit changed?) — correct to not-registered
+                        ledRef.greenOnBlinkRed();
+                    } else if (!response.found() && !cacheFoundIt) {
+                        // Both agree: not found
+                        ledRef.greenOnBlinkRed();
+                    }
+                    // If both agree found, server response may have more accurate startTime
+                    if (response.found() && cacheFoundIt && response.startTime() != null) {
+                        showFoundLed(ledRef, response.startTime());
+                    }
+                });
+
+        ws.connect();
 
         // Configure and open serial port
         port.setComPortParameters(BAUD_RATE, DATA_BITS, STOP_BITS, PARITY);
@@ -103,6 +137,7 @@ public class RaspiReader {
         final OnboardLed onboardLedShutdownRef = onboardLed;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             LOG.info("Shutting down...");
+            ws.shutdown();
             portRef.closePort();
             if (ledShutdownRef != null) ledShutdownRef.shutdown();
             if (onboardLedShutdownRef != null) onboardLedShutdownRef.shutdown();
@@ -112,7 +147,7 @@ public class RaspiReader {
         // Main read loop
         byte[] readBuffer = new byte[256];
         int lastCardNumber = -1;
-        int previousCardNumber = -1; // card before the current one
+        int previousCardNumber = -1;
         long lastReadTime = 0;
         final long REREAD_TIMEOUT_MS = 10_000;
 
@@ -128,7 +163,7 @@ public class RaspiReader {
                     int cardNumber = reading.cardNumber();
                     long now = System.currentTimeMillis();
 
-                    // Same card still on reader — extend LED blinking, skip REST call
+                    // Same card still on reader — extend LED blinking, skip sending
                     // unless a different card was read in between or timeout exceeded
                     if (cardNumber == lastCardNumber) {
                         boolean differentCardInBetween = previousCardNumber != lastCardNumber && previousCardNumber != -1;
@@ -142,51 +177,38 @@ public class RaspiReader {
                     previousCardNumber = lastCardNumber;
                     lastCardNumber = cardNumber;
                     lastReadTime = now;
+                    lastDisplayedCard = cardNumber;
 
                     LOG.info("Card read: " + cardNumber);
                     readLogger.logRead(cardNumber);
 
-                    // Add to buffer (only unique numbers kept)
-                    boolean isNew = buffer.add(cardNumber);
-                    if (isNew) {
-                        LOG.info("New card added to buffer: " + cardNumber);
-                    } else {
-                        LOG.info("Card already in buffer: " + cardNumber);
-                    }
-
-                    // Send immediately to REST endpoint
-                    var toSend = buffer.snapshot();
-                    var response = sender.send(toSend);
-                    if (response.result() != RestSender.SendResult.FAILED) {
-                        buffer.removeAll(toSend);
-                    }
-
-                    // Blink LEDs based on response
+                    // Immediate LED feedback from local startlist cache
                     if (ledRef != null) {
-                        switch (response.result()) {
-                            case RUNNER_FOUND -> {
-                                if (response.startTime() != null) {
-                                    long minutesToStart = java.time.Duration.between(
-                                            java.time.LocalTime.now(), response.startTime()).toMinutes();
-                                    if (minutesToStart < 0) {
-                                        ledRef.blinkGreenFast();
-                                    } else if (minutesToStart < 4) {
-                                        ledRef.blinkGreen();
-                                    } else if (minutesToStart <= 5) {
-                                        ledRef.greenSteady();
-                                    } else {
-                                        ledRef.alternateGreenRed();
-                                    }
-                                } else {
-                                    ledRef.blinkGreen();
-                                }
-                            }
-                            case CARD_NOT_REGISTERED -> ledRef.greenOnBlinkRed();
-                            default -> ledRef.blinkRed();
+                        var cached = startlistCache.lookup(cardNumber);
+                        if (cached != null) {
+                            showFoundLed(ledRef, cached.startTime());
+                        } else {
+                            ledRef.greenOnBlinkRed();
                         }
                     }
                     if (onboardLedRef != null) {
                         onboardLedRef.blink();
+                    }
+
+                    // Send via WebSocket (async) — server response may override LED
+                    if (!ws.sendReading(cardNumber)) {
+                        // WebSocket not connected, buffer for later
+                        buffer.add(cardNumber);
+                        LOG.info("Buffered card (WS disconnected): " + cardNumber);
+                    }
+
+                    // Flush buffer if connected
+                    if (ws.isConnected() && buffer.hasData()) {
+                        for (int buffered : buffer.snapshot()) {
+                            if (ws.sendReading(buffered)) {
+                                buffer.removeAll(java.util.List.of(buffered));
+                            }
+                        }
                     }
                 }
             } catch (Exception e) {
@@ -198,6 +220,27 @@ public class RaspiReader {
                     break;
                 }
             }
+        }
+    }
+
+    static void showFoundLed(LedController led, LocalTime startTime) {
+        if (startTime != null) {
+            long secondsToStart = Duration.between(LocalTime.now(), startTime).toSeconds();
+            if (secondsToStart < 0) {
+                // Already late
+                led.blinkGreenFast();
+            } else if (secondsToStart <= 4 * 60) {
+                // 0–4 min: guide runner to correct start
+                led.blinkGreen();
+            } else if (secondsToStart < 5 * 60) {
+                // 4:01–4:59: normal pre-start, steady green
+                led.greenSteady();
+            } else {
+                // >5 min: too early
+                led.alternateGreenRed();
+            }
+        } else {
+            led.blinkGreen();
         }
     }
 
@@ -261,7 +304,7 @@ public class RaspiReader {
 
                 Options:
                   --url <url>          Server URL (default: http://m4m.local:8080)
-                  --password <pwd>     Competition password (X-Competition-Password header)
+                                       WebSocket connects to ws://<host>:<port>/ws/machine-reading
                   --machine-id <id>    Machine identifier (default: auto-detect from MAC/machine-id)
                   --serial <device>    Serial port device (default: auto-detect /dev/ttyUSB*)
                   --log <path>         Log file path (default: /var/log/raspireader/reads.log)

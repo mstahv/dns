@@ -134,20 +134,19 @@ All card reads (including re-reads of the same card) are logged with timestamps:
 2026-04-10 14:31:01 CARD=208560
 ```
 
-## REST API
+## WebSocket API
 
-Card numbers are sent as POST requests to `/api/machine-reading`:
+The reader communicates with the server over a persistent WebSocket connection to `ws://<host>:<port>/ws/machine-reading`. This minimizes latency and enables the server to push startlist updates.
 
-```json
-POST /api/machine-reading
-Content-Type: application/json
-X-Competition-Password: <password>
-X-Machine-Id: <machine-id>
+### Protocol flow
 
-[{"cc": 208560}, {"cc": 123456}]
-```
+1. **Auth**: reader sends `{"type":"auth","machineId":"..."}`, server responds `{"type":"auth","ok":true}`
+2. **Startlist**: server automatically pushes `{"type":"startlist","data":{"<cc>":{"bib":<n>,"st":"HH:mm:ss"},...}}` — the reader caches this locally for instant LED feedback
+3. **Reading**: reader sends `{"cc":<cardNumber>}`, server responds with `[{"bib":...,"startTime":"...","found":true/false}]`
 
-Successfully sent card numbers are removed from the in-memory buffer.
+The local startlist cache allows immediate LED response even if the server connection is temporarily down. Server responses are always respected and may override the cached result (e.g., if an emit card was just reassigned).
+
+Cards read while disconnected are buffered and sent when the connection is restored. Reconnection uses exponential backoff (1s–30s).
 
 ## Installing JDK 25 on Raspberry Pi
 

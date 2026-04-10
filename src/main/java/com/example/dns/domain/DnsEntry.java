@@ -1,19 +1,32 @@
 package com.example.dns.domain;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.relational.core.mapping.Table;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
 import java.time.LocalDateTime;
 
-@Table("dns_entry")
+@Entity
+@Table(name = "dns_entry")
 public class DnsEntry {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    private String competitionId;
+
+    @Column(nullable = false)
+    private String password;
+
+    @Column(nullable = false)
     private Integer competitorNumber;
+
     private LocalDateTime registeredAt;
     private String registeredBy;
+
+    @Column(length = 500)
     private String comment;
 
     public Long getId() {
@@ -24,12 +37,12 @@ public class DnsEntry {
         this.id = id;
     }
 
-    public String getCompetitionId() {
-        return competitionId;
+    public String getPassword() {
+        return password;
     }
 
-    public void setCompetitionId(String competitionId) {
-        this.competitionId = competitionId;
+    public void setPassword(String password) {
+        this.password = password;
     }
 
     public Integer getCompetitorNumber() {

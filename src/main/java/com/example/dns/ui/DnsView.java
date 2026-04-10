@@ -1,11 +1,14 @@
 package com.example.dns.ui;
 
+import com.example.dns.domain.CompetitionRepository;
 import com.example.dns.service.DnsService;
 import com.example.dns.service.TulospalveluService;
 import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.AttachEvent;
+import com.vaadin.flow.component.DetachEvent;
 import com.vaadin.flow.component.confirmdialog.ConfirmDialog;
 import com.vaadin.flow.component.html.H1;
+import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.dom.ElementEffect;
 import com.vaadin.flow.router.Route;
@@ -32,6 +35,7 @@ public class DnsView extends VerticalLayout {
     static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
     private static final int INITIAL_SLOTS = 10;
 
+    private final CompetitionRepository competitionRepository;
     private final TulospalveluService tulospalveluService;
     private final DnsService dnsService;
     private final UserSession userSession;
@@ -40,8 +44,10 @@ public class DnsView extends VerticalLayout {
     private final Map<Integer, RunnerCard> cardsByBib = new HashMap<>();
     private final Set<String> allStartPlaces = new TreeSet<>();
 
+    private String password;
     private String competitionId;
     private SharedNumberSignal changeSignal;
+    private java.util.function.Consumer<String> startListListener;
     private int materializedCount;
     private Set<String> selectedStartPlaces = Set.of();
     private String nameFilter = "";
@@ -49,17 +55,27 @@ public class DnsView extends VerticalLayout {
     private boolean showStarted = true;
     private boolean showNotStarted = true;
 
-    public DnsView(TulospalveluService tulospalveluService, DnsService dnsService,
+    public DnsView(CompetitionRepository competitionRepository,
+                   TulospalveluService tulospalveluService, DnsService dnsService,
                    UserSession userSession) {
+        this.competitionRepository = competitionRepository;
         this.tulospalveluService = tulospalveluService;
         this.dnsService = dnsService;
         this.userSession = userSession;
         setWidthFull();
         getStyle().set("--vaadin-card-title-font-size", "var(--aura-font-size-xl)");
+
+        setCompetition(userSession.getPassword());
     }
 
-    public void setCompetition(String competitionId) {
-        this.competitionId = competitionId;
+    public void setCompetition(String password) {
+        if (password == null) {
+            return;
+        }
+        this.password = password;
+        this.competitionId = competitionRepository.findById(password)
+                .map(c -> c.getCompetitionId())
+                .orElse(password);
         removeAll();
         slotsByTime.clear();
         slotList.clear();
@@ -74,7 +90,7 @@ public class DnsView extends VerticalLayout {
             return;
         }
 
-        changeSignal = dnsService.getChangeSignal(competitionId);
+        changeSignal = dnsService.getChangeSignal(password);
 
         var sortedTimes = new TreeMap<LocalTime, StartTimeSlot>();
         for (var classStart : startList.getClassStart()) {
@@ -125,12 +141,12 @@ public class DnsView extends VerticalLayout {
 
     private void materializeMore(int targetTotal) {
         // Get current started bibs from signal
-        Set<Integer> startedBibs = dnsService.getStartedBibs(competitionId);
+        Set<Integer> startedBibs = dnsService.getStartedBibs(password);
 
         int end = Math.min(targetTotal, slotList.size());
         int previousCount = materializedCount;
         for (int i = materializedCount; i < end; i++) {
-            slotList.get(i).materialize(competitionId, dnsService, startedBibs,
+            slotList.get(i).materialize(password, dnsService, startedBibs,
                     this::onCardClicked);
             // Register cards for signal-driven updates
             for (RunnerCard card : slotList.get(i).getRunnerCards()) {
@@ -146,7 +162,7 @@ public class DnsView extends VerticalLayout {
 
     public void syncCardsFromSignal() {
         for (var entry : cardsByBib.entrySet()) {
-            boolean shouldBeStarted = dnsService.isStarted(competitionId, entry.getKey());
+            boolean shouldBeStarted = dnsService.isStarted(password, entry.getKey());
             RunnerCard card = entry.getValue();
             if (card.isStarted() != shouldBeStarted) {
                 card.setStarted(shouldBeStarted);
@@ -171,7 +187,7 @@ public class DnsView extends VerticalLayout {
     }
 
     void onCardClicked(RunnerCard card) {
-        boolean serverStarted = dnsService.isStarted(competitionId, card.getBibNumber());
+        boolean serverStarted = dnsService.isStarted(password, card.getBibNumber());
 
         if (serverStarted) {
             card.setStarted(true);
@@ -181,7 +197,7 @@ public class DnsView extends VerticalLayout {
                     card.getName() + " (nro " + card.getBibNumber() + ") on merkitty lähteneeksi. Haluatko perua merkinnän?",
                     "Peru merkintä",
                     e -> {
-                        dnsService.unmarkStarted(competitionId, card.getBibNumber());
+                        dnsService.unmarkStarted(password, card.getBibNumber());
                         card.setStarted(false);
                     });
             dialog.setCancelable(true);
@@ -189,7 +205,7 @@ public class DnsView extends VerticalLayout {
             dialog.setConfirmButtonTheme("error primary");
             dialog.open();
         } else {
-            dnsService.markStarted(competitionId, card.getBibNumber(), userSession.getName());
+            dnsService.markStarted(password, card.getBibNumber(), userSession.getName());
             card.setStarted(true);
         }
     }
@@ -207,6 +223,27 @@ public class DnsView extends VerticalLayout {
                 changeSignal.get();
                 getUI().ifPresent(currentUi -> currentUi.access(this::syncCardsFromSignal));
             });
+        }
+
+        // Listen for start list updates (e.g. changed start times, emit numbers)
+        startListListener = updatedCompetitionId -> {
+            if (updatedCompetitionId.equals(competitionId)) {
+                getUI().ifPresent(ui -> ui.access(() -> {
+                    Notification.show("Lähtölista päivittynyt, näkymä päivitetään...");
+                    setCompetition(password);
+                    findAncestor(TopLayout.class).initFilters(this);
+                }));
+            }
+        };
+        tulospalveluService.addStartListUpdateListener(startListListener);
+    }
+
+    @Override
+    protected void onDetach(DetachEvent detachEvent) {
+        super.onDetach(detachEvent);
+        if (startListListener != null) {
+            tulospalveluService.removeStartListUpdateListener(startListListener);
+            startListListener = null;
         }
     }
 

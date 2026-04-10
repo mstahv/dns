@@ -1,17 +1,25 @@
 package com.example.dns.domain;
 
-import org.springframework.data.annotation.Id;
-import org.springframework.data.relational.core.mapping.Table;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
-@Table("approved_machine")
-public class ApprovedMachine {
+@Entity
+@Table(name = "machine")
+public class Machine {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    private String competitionId;
+
+    @Column(unique = true, nullable = false)
     private String machineId;
+
+    @Column(nullable = false)
     private String machineName;
-    private boolean approved;
 
     public Long getId() {
         return id;
@@ -19,14 +27,6 @@ public class ApprovedMachine {
 
     public void setId(Long id) {
         this.id = id;
-    }
-
-    public String getCompetitionId() {
-        return competitionId;
-    }
-
-    public void setCompetitionId(String competitionId) {
-        this.competitionId = competitionId;
     }
 
     public String getMachineId() {
@@ -43,13 +43,5 @@ public class ApprovedMachine {
 
     public void setMachineName(String machineName) {
         this.machineName = machineName;
-    }
-
-    public boolean isApproved() {
-        return approved;
-    }
-
-    public void setApproved(boolean approved) {
-        this.approved = approved;
     }
 }

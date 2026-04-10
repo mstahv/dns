@@ -1,10 +1,10 @@
 package com.example.dns.domain;
 
-import org.springframework.data.repository.ListCrudRepository;
+import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 
-public interface DnsEntryRepository extends ListCrudRepository<DnsEntry, Long> {
+public interface DnsEntryRepository extends JpaRepository<DnsEntry, Long> {
 
-    List<DnsEntry> findByCompetitionId(String competitionId);
+    List<DnsEntry> findByPassword(String password);
 }

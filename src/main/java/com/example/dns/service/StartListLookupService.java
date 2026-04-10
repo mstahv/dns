@@ -5,12 +5,46 @@ import org.springframework.stereotype.Service;
 
 import javax.xml.datatype.XMLGregorianCalendar;
 import java.time.LocalTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
 public class StartListLookupService {
 
     public record RunnerInfo(int bibNumber, LocalTime startTime, String name, String className) {
+    }
+
+    public record ControlCardEntry(int bib, String st) {
+    }
+
+    /**
+     * Builds a compact map from control card number to {bib, startTime}
+     * for all runners in a competition.
+     */
+    public Map<String, ControlCardEntry> buildControlCardMap(String competitionId) {
+        StartList startList = tulospalveluService.getStartList(competitionId);
+        if (startList == null) {
+            return Map.of();
+        }
+        Map<String, ControlCardEntry> map = new LinkedHashMap<>();
+        for (var classStart : startList.getClassStart()) {
+            for (var personStart : classStart.getPersonStart()) {
+                for (var raceStart : personStart.getStart()) {
+                    int bib = parseBib(raceStart.getBibNumber());
+                    LocalTime st = toLocalTime(raceStart.getStartTime());
+                    if (raceStart.getControlCard() != null) {
+                        for (var cc : raceStart.getControlCard()) {
+                            if (cc.getValue() != null && !cc.getValue().isBlank()) {
+                                map.put(cc.getValue(),
+                                        new ControlCardEntry(bib, st != null ? st.toString() : ""));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return map;
     }
 
     private final TulospalveluService tulospalveluService;

@@ -27,44 +27,44 @@ public class DnsService {
      * Returns a shared signal that increments on every change.
      * UI views can subscribe to this to react to changes from other users.
      */
-    public SharedNumberSignal getChangeSignal(String competitionId) {
-        return changeCounters.computeIfAbsent(competitionId, k -> new SharedNumberSignal());
+    public SharedNumberSignal getChangeSignal(String password) {
+        return changeCounters.computeIfAbsent(password, k -> new SharedNumberSignal());
     }
 
-    public Set<Integer> getStartedBibs(String competitionId) {
-        return startedCache.computeIfAbsent(competitionId, this::loadFromDb);
+    public Set<Integer> getStartedBibs(String password) {
+        return startedCache.computeIfAbsent(password, this::loadFromDb);
     }
 
-    public void markStarted(String competitionId, int bibNumber, String registeredBy) {
-        getStartedBibs(competitionId).add(bibNumber);
+    public void markStarted(String password, int bibNumber, String registeredBy) {
+        getStartedBibs(password).add(bibNumber);
 
         var entry = new DnsEntry();
-        entry.setCompetitionId(competitionId);
+        entry.setPassword(password);
         entry.setCompetitorNumber(bibNumber);
         entry.setRegisteredAt(LocalDateTime.now());
         entry.setRegisteredBy(registeredBy);
         repository.save(entry);
 
-        getChangeSignal(competitionId).incrementBy(1);
+        getChangeSignal(password).incrementBy(1);
     }
 
-    public void unmarkStarted(String competitionId, int bibNumber) {
-        getStartedBibs(competitionId).remove(bibNumber);
+    public void unmarkStarted(String password, int bibNumber) {
+        getStartedBibs(password).remove(bibNumber);
 
-        repository.findByCompetitionId(competitionId).stream()
+        repository.findByPassword(password).stream()
                 .filter(e -> e.getCompetitorNumber() == bibNumber)
                 .findFirst()
                 .ifPresent(repository::delete);
 
-        getChangeSignal(competitionId).incrementBy(1);
+        getChangeSignal(password).incrementBy(1);
     }
 
-    public boolean isStarted(String competitionId, int bibNumber) {
-        return getStartedBibs(competitionId).contains(bibNumber);
+    public boolean isStarted(String password, int bibNumber) {
+        return getStartedBibs(password).contains(bibNumber);
     }
 
-    public Optional<DnsEntry> getEntry(String competitionId, int bibNumber) {
-        return repository.findByCompetitionId(competitionId).stream()
+    public Optional<DnsEntry> getEntry(String password, int bibNumber) {
+        return repository.findByPassword(password).stream()
                 .filter(e -> e.getCompetitorNumber() == bibNumber)
                 .findFirst();
     }
@@ -74,8 +74,8 @@ public class DnsService {
         changeCounters.clear();
     }
 
-    private Set<Integer> loadFromDb(String competitionId) {
-        return repository.findByCompetitionId(competitionId).stream()
+    private Set<Integer> loadFromDb(String password) {
+        return repository.findByPassword(password).stream()
                 .map(DnsEntry::getCompetitorNumber)
                 .collect(Collectors.toCollection(ConcurrentHashMap::newKeySet));
     }

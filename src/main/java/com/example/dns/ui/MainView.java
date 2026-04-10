@@ -14,8 +14,10 @@ import com.vaadin.flow.component.page.WebStorage;
 import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.router.Route;
+import org.vaadin.firitin.appframework.MenuItem;
 
 @Route(value = "", autoLayout = false)
+@MenuItem(title = "Kisan valinta", order = MenuItem.END)
 public class MainView extends VerticalLayout {
 
     private static final String LS_USER_NAME = "dns-user-name";
@@ -78,10 +80,10 @@ public class MainView extends VerticalLayout {
                         competition -> {
                             saveUserName();
                             savePassword(passwordField.getValue());
-                            userSession.setCompetitionId(competition.getCompetitionId());
+                            userSession.setPassword(competition.getPassword());
                             getUI().ifPresent(ui -> ui.navigate(DnsView.class)
                                     .ifPresent(view -> view.setCompetition(
-                                            competition.getCompetitionId())));
+                                            competition.getPassword())));
                         },
                         () -> Notification.show("Väärä salasana")
                 );
@@ -129,9 +131,9 @@ public class MainView extends VerticalLayout {
 
                 saveUserName();
                 savePassword(password.trim());
-                userSession.setCompetitionId(selected.eventId());
+                userSession.setPassword(password.trim());
                 getUI().ifPresent(ui -> ui.navigate(DnsView.class)
-                        .ifPresent(view -> view.setCompetition(selected.eventId())));
+                        .ifPresent(view -> view.setCompetition(password.trim())));
             });
             add(combo, passwordField, createButton);
         }

@@ -78,11 +78,11 @@ class DnsRestControllerTest {
 
         assertEquals(200, response.statusCode());
 
-        assertTrue(dnsService.isStarted("2026_test", 100));
-        assertTrue(dnsService.isStarted("2026_test", 200));
-        assertTrue(dnsService.isStarted("2026_test", 300));
+        assertTrue(dnsService.isStarted("secret", 100));
+        assertTrue(dnsService.isStarted("secret", 200));
+        assertTrue(dnsService.isStarted("secret", 300));
 
-        var entry = dnsService.getEntry("2026_test", 100);
+        var entry = dnsService.getEntry("secret", 100);
         assertTrue(entry.isPresent());
         assertEquals("kellokalle", entry.get().getRegisteredBy());
     }
@@ -92,7 +92,19 @@ class DnsRestControllerTest {
         var response = postStarted("wrong", "kellokalle", "100");
 
         assertEquals(401, response.statusCode());
-        assertFalse(dnsService.isStarted("2026_test", 100));
+        assertFalse(dnsService.isStarted("secret", 100));
+    }
+
+    @Test
+    void disabledCompetition_returns403() throws Exception {
+        var competition = competitionRepository.findById("secret").orElseThrow();
+        competition.setEnabled(false);
+        competitionRepository.save(competition);
+
+        var response = postStarted("secret", "kellokalle", "100");
+
+        assertEquals(403, response.statusCode());
+        assertFalse(dnsService.isStarted("secret", 100));
     }
 
     @Test
@@ -101,8 +113,8 @@ class DnsRestControllerTest {
         var response = postStarted("secret", "kellokalle", "100,200");
 
         assertEquals(200, response.statusCode());
-        assertTrue(dnsService.isStarted("2026_test", 100));
-        assertTrue(dnsService.isStarted("2026_test", 200));
+        assertTrue(dnsService.isStarted("secret", 100));
+        assertTrue(dnsService.isStarted("secret", 200));
     }
 
     @Test
@@ -119,7 +131,8 @@ class DnsRestControllerTest {
         try {
             var userUi = app.newUser().newWindow();
             DnsView view = userUi.navigate(DnsView.class);
-            view.setCompetition("2026_viking");
+            // TODO make setCompetition private, set here in test via UserSession, before navigating
+            view.setCompetition("viking_pw");
 
             // Pick a runner from the first slot
             RunnerCard card = view.getSlotsByTime().values().iterator().next()
@@ -131,7 +144,7 @@ class DnsRestControllerTest {
             postStarted("viking_pw", "kellokalle", String.valueOf(bib));
 
             // Verify the service state changed
-            assertTrue(dnsService.isStarted("2026_viking", bib),
+            assertTrue(dnsService.isStarted("viking_pw", bib),
                     "DnsService should reflect REST API change");
 
             // Simulate signal effect: sync cards from signal

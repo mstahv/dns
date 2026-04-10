@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class DnsViewTest {
 
     private static final String COMPETITION_ID = "2026_viking";
+    private static final String PASSWORD = "test123";
 
     @Autowired
     ApplicationContext springContext;
@@ -54,8 +55,8 @@ class DnsViewTest {
         // Create competition in DB
         var competition = new com.example.dns.domain.Competition();
         competition.setCompetitionId(COMPETITION_ID);
-        competition.setPassword("test123");
-        if (competitionRepository.findById("test123").isEmpty()) {
+        competition.setPassword(PASSWORD);
+        if (competitionRepository.findById(PASSWORD).isEmpty()) {
             competitionRepository.save(competition);
         }
 
@@ -74,7 +75,7 @@ class DnsViewTest {
 
     private DnsView navigateToDns() {
         DnsView view = ui.navigate(DnsView.class);
-        view.setCompetition(COMPETITION_ID);
+        view.setCompetition(PASSWORD);
         return view;
     }
 
@@ -322,11 +323,11 @@ class DnsViewTest {
         view.onCardClicked(card);
 
         assertTrue(card.isStarted(), "Card should be marked as started after click");
-        assertTrue(dnsService.isStarted(COMPETITION_ID, bib),
+        assertTrue(dnsService.isStarted(PASSWORD, bib),
                 "DnsService should reflect started state");
 
         // Verify entry has registeredBy
-        var entry = dnsService.getEntry(COMPETITION_ID, bib);
+        var entry = dnsService.getEntry(PASSWORD, bib);
         assertTrue(entry.isPresent(), "DnsEntry should exist");
         assertEquals("Testikäyttäjä", entry.get().getRegisteredBy());
     }
@@ -355,7 +356,7 @@ class DnsViewTest {
         ComponentUtil.fireEvent(dialog, new ConfirmDialog.ConfirmEvent(dialog, false));
 
         assertFalse(card.isStarted(), "Card should be unmarked after confirm");
-        assertFalse(dnsService.isStarted(COMPETITION_ID, bib),
+        assertFalse(dnsService.isStarted(PASSWORD, bib),
                 "DnsService should reflect unmarked state");
     }
 
@@ -381,7 +382,7 @@ class DnsViewTest {
                 new ConfirmDialog.CancelEvent(dialogs.getFirst(), false));
 
         assertTrue(card.isStarted(), "Card should remain started after cancel");
-        assertTrue(dnsService.isStarted(COMPETITION_ID, bib),
+        assertTrue(dnsService.isStarted(PASSWORD, bib),
                 "DnsService should still show started");
     }
 
@@ -394,7 +395,7 @@ class DnsViewTest {
 
         VaadinTestUiContext ui2 = app.newUser().newWindow();
         DnsView view2 = ui2.navigate(DnsView.class);
-        view2.setCompetition(COMPETITION_ID);
+        view2.setCompetition(PASSWORD);
 
         // Pick same runner from both views
         ui.activate();
@@ -417,7 +418,7 @@ class DnsViewTest {
         assertTrue(card1.isStarted(), "User 1 card should be started");
 
         // Verify signal state is shared
-        assertTrue(dnsService.isStarted(COMPETITION_ID, bib),
+        assertTrue(dnsService.isStarted(PASSWORD, bib),
                 "DnsService signal should reflect started state");
 
         // User 2 syncs from shared signal — should see the change
@@ -434,7 +435,7 @@ class DnsViewTest {
 
         VaadinTestUiContext ui2 = app.newUser().newWindow();
         DnsView view2 = ui2.navigate(DnsView.class);
-        view2.setCompetition(COMPETITION_ID);
+        view2.setCompetition(PASSWORD);
 
         // Pick same runner
         ui.activate();
@@ -480,7 +481,7 @@ class DnsViewTest {
         // User 2 opens the same competition later
         VaadinTestUiContext ui2 = app.newUser().newWindow();
         DnsView view2 = ui2.navigate(DnsView.class);
-        view2.setCompetition(COMPETITION_ID);
+        view2.setCompetition(PASSWORD);
 
         RunnerCard card2 = view2.getSlotsByTime().values().iterator().next()
                 .getRunnerCards().stream()

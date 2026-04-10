@@ -1,10 +1,10 @@
 package com.example.dns.domain;
 
-import org.springframework.data.repository.ListCrudRepository;
+import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
 
-public interface CompetitionRepository extends ListCrudRepository<Competition, String> {
+public interface CompetitionRepository extends JpaRepository<Competition, String> {
 
     List<Competition> findByCompetitionId(String competitionId);
 }

@@ -31,20 +31,20 @@ public class RunnerCard extends Card {
     private final String startPlace;
     private final LocalTime startTime;
     private final LocalDateTime startDateTime;
-    private final String competitionId;
+    private final String password;
     private final DnsService dnsService;
     private boolean started;
 
     public RunnerCard(PersonStart personStart, String className, int bibNumber,
                       String startPlace, LocalTime startTime, LocalDateTime startDateTime,
-                      String competitionId, DnsService dnsService) {
+                      String password, DnsService dnsService) {
         this.personStart = personStart;
         this.className = className;
         this.bibNumber = bibNumber;
         this.startPlace = startPlace != null ? startPlace : "";
         this.startTime = startTime;
         this.startDateTime = startDateTime;
-        this.competitionId = competitionId;
+        this.password = password;
         this.dnsService = dnsService;
 
         setTitle(bibNumber + " " + getName());
@@ -104,7 +104,7 @@ public class RunnerCard extends Card {
             }
         }
 
-        var entry = dnsService.getEntry(competitionId, bibNumber);
+        var entry = dnsService.getEntry(password, bibNumber);
         if (entry.isPresent()) {
             DnsEntry e = entry.get();
             layout.add(detail("Kirjattu lähteneeksi",

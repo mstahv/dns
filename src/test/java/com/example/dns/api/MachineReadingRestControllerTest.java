@@ -1,12 +1,14 @@
 package com.example.dns.api;
 
 import com.example.dns.TestcontainersConfiguration;
-import com.example.dns.domain.ApprovedMachine;
-import com.example.dns.domain.ApprovedMachineRepository;
 import com.example.dns.domain.Competition;
+import com.example.dns.domain.CompetitionMachine;
+import com.example.dns.domain.CompetitionMachineRepository;
 import com.example.dns.domain.CompetitionRepository;
 import com.example.dns.domain.DnsEntryRepository;
+import com.example.dns.domain.Machine;
 import com.example.dns.domain.MachineReadingRepository;
+import com.example.dns.domain.MachineRepository;
 import com.example.dns.service.DnsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,7 +39,10 @@ class MachineReadingRestControllerTest {
     CompetitionRepository competitionRepository;
 
     @Autowired
-    ApprovedMachineRepository approvedMachineRepository;
+    MachineRepository machineRepository;
+
+    @Autowired
+    CompetitionMachineRepository competitionMachineRepository;
 
     @Autowired
     MachineReadingRepository machineReadingRepository;
@@ -53,8 +58,9 @@ class MachineReadingRestControllerTest {
     @BeforeEach
     void setUp() {
         machineReadingRepository.deleteAll();
-        approvedMachineRepository.deleteAll();
+        competitionMachineRepository.deleteAll();
         dnsEntryRepository.deleteAll();
+        machineRepository.deleteAll();
         dnsService.clearCache();
 
         competitionRepository.deleteById(PASSWORD);
@@ -65,20 +71,25 @@ class MachineReadingRestControllerTest {
     }
 
     private void approveMachine(String machineId) {
-        var machine = new ApprovedMachine();
-        machine.setCompetitionId(COMPETITION_ID);
-        machine.setMachineId(machineId);
-        machine.setMachineName("Lukija");
-        machine.setApproved(true);
-        approvedMachineRepository.save(machine);
+        var machine = machineRepository.findByMachineId(machineId)
+                .orElseGet(() -> {
+                    var m = new Machine();
+                    m.setMachineId(machineId);
+                    m.setMachineName("Lukija");
+                    return machineRepository.save(m);
+                });
+        var cm = new CompetitionMachine();
+        cm.setPassword(PASSWORD);
+        cm.setMachine(machine);
+        cm.setApproved(true);
+        competitionMachineRepository.save(cm);
     }
 
-    private HttpResponse<String> postReading(String password, String machineId, String jsonBody)
+    private HttpResponse<String> postReading(String machineId, String jsonBody)
             throws Exception {
         var request = HttpRequest.newBuilder()
                 .uri(URI.create("http://localhost:" + port + "/api/machine-reading"))
                 .header("Content-Type", "application/json")
-                .header("X-Competition-Password", password)
                 .header("X-Machine-Id", machineId)
                 .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                 .build();
@@ -89,55 +100,81 @@ class MachineReadingRestControllerTest {
     void approvedMachine_processesReadingAndMarksStarted() throws Exception {
         approveMachine(MACHINE_ID);
 
-        var response = postReading(PASSWORD, MACHINE_ID, "[{\"bib\": 1}]");
+        var response = postReading(MACHINE_ID, "[{\"bib\": 1}]");
 
         assertEquals(200, response.statusCode());
         assertTrue(response.body().contains("\"found\""));
 
-        var readings = machineReadingRepository.findTop100ByCompetitionIdOrderByReadAtDesc(COMPETITION_ID);
+        var readings = machineReadingRepository.findTop100ByPasswordOrderByReadAtDesc(PASSWORD);
         assertEquals(1, readings.size());
     }
 
     @Test
-    void unknownMachine_autoRegistersAndBuffersReading() throws Exception {
-        var response = postReading(PASSWORD, "new-reader", "[{\"bib\": 1}]");
+    void unknownMachine_returnsEmptyResults() throws Exception {
+        // Machine with no competition associations → readings are ignored
+        var response = postReading("new-reader", "[{\"bib\": 1}]");
 
         assertEquals(200, response.statusCode());
 
-        // Machine auto-registered as unapproved
-        var machine = approvedMachineRepository
-                .findByCompetitionIdAndMachineId(COMPETITION_ID, "new-reader");
-        assertTrue(machine.isPresent(), "Kone pitäisi rekisteröityä automaattisesti");
-        assertFalse(machine.get().isApproved(), "Uuden koneen ei pitäisi olla hyväksytty");
+        // Global machine auto-created
+        var machine = machineRepository.findByMachineId("new-reader");
+        assertTrue(machine.isPresent(), "Kone pitäisi luoda automaattisesti");
 
-        // Reading is logged but runner not marked as started
-        var readings = machineReadingRepository.findTop100ByCompetitionIdOrderByReadAtDesc(COMPETITION_ID);
+        // No competition association → no readings stored
+        assertEquals("[]", response.body(),
+                "Ilman kisayhteyttä ei pitäisi tulla tuloksia");
+    }
+
+    @Test
+    void unapprovedMachine_buffersReading() throws Exception {
+        // Create machine and associate with competition but don't approve
+        var machine = new Machine();
+        machine.setMachineId(MACHINE_ID);
+        machine.setMachineName("Lukija");
+        machineRepository.save(machine);
+
+        var cm = new CompetitionMachine();
+        cm.setPassword(PASSWORD);
+        cm.setMachine(machine);
+        cm.setApproved(false);
+        competitionMachineRepository.save(cm);
+
+        var response = postReading(MACHINE_ID, "[{\"bib\": 1}]");
+
+        assertEquals(200, response.statusCode());
+
+        var readings = machineReadingRepository.findTop100ByPasswordOrderByReadAtDesc(PASSWORD);
         assertEquals(1, readings.size());
         assertFalse(readings.getFirst().isFound(), "Puskuroidun lukeman found pitäisi olla false");
 
-        assertFalse(dnsService.isStarted(COMPETITION_ID, 1),
+        assertFalse(dnsService.isStarted(PASSWORD, 1),
                 "Hyväksymättömän koneen lukema ei saa merkitä juoksijaa lähteneeksi");
     }
 
     @Test
-    void invalidPassword_returns401() throws Exception {
-        var response = postReading("wrong_password", MACHINE_ID, "[{\"bib\": 1}]");
+    void disabledCompetition_ignoresReadings() throws Exception {
+        approveMachine(MACHINE_ID);
 
-        assertEquals(401, response.statusCode());
+        var competition = competitionRepository.findById(PASSWORD).orElseThrow();
+        competition.setEnabled(false);
+        competitionRepository.save(competition);
 
-        var readings = machineReadingRepository.findTop100ByCompetitionIdOrderByReadAtDesc(COMPETITION_ID);
-        assertTrue(readings.isEmpty());
+        var response = postReading(MACHINE_ID, "[{\"bib\": 1}]");
+
+        assertEquals(200, response.statusCode());
+        assertEquals("[]", response.body(),
+                "Päättyneen kisan lukemia ei pitäisi käsitellä");
     }
 
     @Test
     void ccLookup_withApprovedMachine() throws Exception {
         approveMachine(MACHINE_ID);
 
-        var response = postReading(PASSWORD, MACHINE_ID, "[{\"cc\": 99999}]");
+        var response = postReading(MACHINE_ID, "[{\"cc\": 99999}]");
 
         assertEquals(200, response.statusCode());
 
-        var readings = machineReadingRepository.findTop100ByCompetitionIdOrderByReadAtDesc(COMPETITION_ID);
+        var readings = machineReadingRepository.findTop100ByPasswordOrderByReadAtDesc(PASSWORD);
         assertEquals(1, readings.size());
         assertEquals("99999", readings.getFirst().getCc());
     }
@@ -146,11 +183,11 @@ class MachineReadingRestControllerTest {
     void multipleReadingsInOneRequest() throws Exception {
         approveMachine(MACHINE_ID);
 
-        var response = postReading(PASSWORD, MACHINE_ID, "[{\"bib\": 1}, {\"bib\": 99999}]");
+        var response = postReading(MACHINE_ID, "[{\"bib\": 1}, {\"bib\": 99999}]");
 
         assertEquals(200, response.statusCode());
 
-        var readings = machineReadingRepository.findTop100ByCompetitionIdOrderByReadAtDesc(COMPETITION_ID);
+        var readings = machineReadingRepository.findTop100ByPasswordOrderByReadAtDesc(PASSWORD);
         assertEquals(2, readings.size());
     }
 
@@ -158,10 +195,10 @@ class MachineReadingRestControllerTest {
     void duplicateReading_loggedTwice() throws Exception {
         approveMachine(MACHINE_ID);
 
-        postReading(PASSWORD, MACHINE_ID, "[{\"bib\": 1}]");
-        postReading(PASSWORD, MACHINE_ID, "[{\"bib\": 1}]");
+        postReading(MACHINE_ID, "[{\"bib\": 1}]");
+        postReading(MACHINE_ID, "[{\"bib\": 1}]");
 
-        var readings = machineReadingRepository.findTop100ByCompetitionIdOrderByReadAtDesc(COMPETITION_ID);
+        var readings = machineReadingRepository.findTop100ByPasswordOrderByReadAtDesc(PASSWORD);
         assertEquals(2, readings.size());
     }
 }

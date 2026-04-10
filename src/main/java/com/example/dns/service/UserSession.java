@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 public class UserSession {
 
     private String name = "";
-    private String competitionId;
+    private String password;
 
     public String getName() {
         return name;
@@ -18,11 +18,11 @@ public class UserSession {
         this.name = name;
     }
 
-    public String getCompetitionId() {
-        return competitionId;
+    public String getPassword() {
+        return password;
     }
 
-    public void setCompetitionId(String competitionId) {
-        this.competitionId = competitionId;
+    public void setPassword(String password) {
+        this.password = password;
     }
 }

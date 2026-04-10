@@ -9,12 +9,12 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
-
-import java.time.LocalDateTime;
+import jakarta.persistence.UniqueConstraint;
 
 @Entity
-@Table(name = "machine_reading")
-public class MachineReading {
+@Table(name = "competition_machine",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"password", "machine_id"}))
+public class CompetitionMachine {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -27,12 +27,8 @@ public class MachineReading {
     @JoinColumn(name = "machine_id", nullable = false)
     private Machine machine;
 
-    private Integer bib;
-    private String cc;
-    private LocalDateTime readAt;
-
     @Column(nullable = false)
-    private boolean found;
+    private boolean approved;
 
     public Long getId() {
         return id;
@@ -58,35 +54,11 @@ public class MachineReading {
         this.machine = machine;
     }
 
-    public Integer getBib() {
-        return bib;
+    public boolean isApproved() {
+        return approved;
     }
 
-    public void setBib(Integer bib) {
-        this.bib = bib;
-    }
-
-    public String getCc() {
-        return cc;
-    }
-
-    public void setCc(String cc) {
-        this.cc = cc;
-    }
-
-    public LocalDateTime getReadAt() {
-        return readAt;
-    }
-
-    public void setReadAt(LocalDateTime readAt) {
-        this.readAt = readAt;
-    }
-
-    public boolean isFound() {
-        return found;
-    }
-
-    public void setFound(boolean found) {
-        this.found = found;
+    public void setApproved(boolean approved) {
+        this.approved = approved;
     }
 }

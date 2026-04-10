@@ -48,14 +48,17 @@ public class DnsRestController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body("Invalid competition password");
         }
+        if (!competition.get().isEnabled()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Kilpailu on päättynyt");
+        }
 
-        String competitionId = competition.get().getCompetitionId();
         int[] bibs = parseBibs(body);
         int count = 0;
 
         for (int bib : bibs) {
-            if (!dnsService.isStarted(competitionId, bib)) {
-                dnsService.markStarted(competitionId, bib, registeredBy);
+            if (!dnsService.isStarted(password, bib)) {
+                dnsService.markStarted(password, bib, registeredBy);
                 count++;
             }
         }
@@ -91,7 +94,7 @@ public class DnsRestController {
                 })
                 .filter(rs -> {
                     int bib = parseBib(rs.getBibNumber());
-                    return bib > 0 && dnsService.isStarted(competitionId, bib);
+                    return bib > 0 && dnsService.isStarted(password, bib);
                 })
                 .map(rs -> rs.getBibNumber().trim())
                 .collect(Collectors.joining(","));
@@ -111,6 +114,7 @@ public class DnsRestController {
         return Arrays.stream(times.split(","))
                 .map(String::trim)
                 .filter(s -> !s.isEmpty())
+                .map(s -> s.replace('.', ':'))
                 .map(LocalTime::parse)
                 .collect(Collectors.toSet());
     }

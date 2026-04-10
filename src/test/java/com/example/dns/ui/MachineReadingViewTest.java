@@ -1,14 +1,15 @@
 package com.example.dns.ui;
 
 import com.example.dns.TestcontainersConfiguration;
-import com.example.dns.domain.ApprovedMachine;
-import com.example.dns.domain.ApprovedMachineRepository;
+import com.example.dns.domain.CompetitionMachine;
+import com.example.dns.domain.CompetitionMachineRepository;
 import com.example.dns.domain.CompetitionRepository;
+import com.example.dns.domain.Machine;
 import com.example.dns.domain.MachineReadingRepository;
+import com.example.dns.domain.MachineRepository;
 import com.vaadin.browserless.VaadinTestApplicationContext;
 import com.vaadin.browserless.VaadinTestUiContext;
 import com.vaadin.browserless.internal.Routes;
-import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.grid.Grid;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class MachineReadingViewTest {
 
     private static final String COMPETITION_ID = "2026_viking";
+    private static final String PASSWORD = "test123";
 
     @Autowired
     ApplicationContext springContext;
@@ -33,7 +35,10 @@ class MachineReadingViewTest {
     CompetitionRepository competitionRepository;
 
     @Autowired
-    ApprovedMachineRepository approvedMachineRepository;
+    MachineRepository machineRepository;
+
+    @Autowired
+    CompetitionMachineRepository competitionMachineRepository;
 
     @Autowired
     MachineReadingRepository machineReadingRepository;
@@ -43,13 +48,14 @@ class MachineReadingViewTest {
 
     @BeforeEach
     void setUp() {
-        approvedMachineRepository.deleteAll();
         machineReadingRepository.deleteAll();
+        competitionMachineRepository.deleteAll();
+        machineRepository.deleteAll();
 
         var competition = new com.example.dns.domain.Competition();
         competition.setCompetitionId(COMPETITION_ID);
-        competition.setPassword("test123");
-        if (competitionRepository.findById("test123").isEmpty()) {
+        competition.setPassword(PASSWORD);
+        if (competitionRepository.findById(PASSWORD).isEmpty()) {
             competitionRepository.save(competition);
         }
 
@@ -65,7 +71,7 @@ class MachineReadingViewTest {
 
     private MachineReadingView navigateToView() {
         MachineReadingView view = ui.navigate(MachineReadingView.class);
-        view.setCompetition(COMPETITION_ID);
+        view.setCompetition(PASSWORD);
         return view;
     }
 
@@ -80,16 +86,20 @@ class MachineReadingViewTest {
     @Test
     void autoRegisteredMachine_shownInGrid() {
         // Simulate auto-registered machine (as REST API would create)
-        var machine = new ApprovedMachine();
-        machine.setCompetitionId(COMPETITION_ID);
+        var machine = new Machine();
         machine.setMachineId("auto-reader");
         machine.setMachineName("auto-reader");
-        machine.setApproved(false);
-        approvedMachineRepository.save(machine);
+        machineRepository.save(machine);
+
+        var cm = new CompetitionMachine();
+        cm.setPassword(PASSWORD);
+        cm.setMachine(machine);
+        cm.setApproved(false);
+        competitionMachineRepository.save(cm);
 
         navigateToView();
 
-        var machines = approvedMachineRepository.findByCompetitionId(COMPETITION_ID);
+        var machines = competitionMachineRepository.findByPassword(PASSWORD);
         assertEquals(1, machines.size());
         assertFalse(machines.getFirst().isApproved(),
                 "Automaattisesti rekisteröity kone ei saa olla hyväksytty");
@@ -97,18 +107,20 @@ class MachineReadingViewTest {
 
     @Test
     void machineGrid_showsApprovalStatus() {
-        var machine = new ApprovedMachine();
-        machine.setCompetitionId(COMPETITION_ID);
+        var machine = new Machine();
         machine.setMachineId("status-test");
         machine.setMachineName("status-test");
-        machine.setApproved(false);
-        approvedMachineRepository.save(machine);
+        machineRepository.save(machine);
+
+        var cm = new CompetitionMachine();
+        cm.setPassword(PASSWORD);
+        cm.setMachine(machine);
+        cm.setApproved(false);
+        competitionMachineRepository.save(cm);
 
         navigateToView();
 
-        // Verify machine is in DB and unapproved
-        var found = approvedMachineRepository
-                .findByCompetitionIdAndMachineId(COMPETITION_ID, "status-test");
+        var found = competitionMachineRepository.findByPasswordAndMachine(PASSWORD, machine);
         assertTrue(found.isPresent());
         assertFalse(found.get().isApproved(),
                 "Kone pitäisi näkyä hyväksymättömänä");

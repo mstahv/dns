@@ -51,7 +51,7 @@ public class StartTimeSlot extends Composite<Div> {
         pendingRunners.add(new PendingRunner(personStart, className, bibNumber, startPlace, startDateTime));
     }
 
-    public void materialize(String competitionId, DnsService dnsService,
+    public void materialize(String password, DnsService dnsService,
                             Set<Integer> startedBibs,
                             SerializableConsumer<RunnerCard> clickListener) {
         if (materialized) {
@@ -81,7 +81,7 @@ public class StartTimeSlot extends Composite<Div> {
         for (var pending : pendingRunners) {
             var card = new RunnerCard(pending.personStart(), pending.className(),
                     pending.bibNumber(), pending.startPlace(), startTime,
-                    pending.startDateTime(), competitionId, dnsService);
+                    pending.startDateTime(), password, dnsService);
             if (startedBibs.contains(pending.bibNumber())) {
                 card.setStarted(true);
             }

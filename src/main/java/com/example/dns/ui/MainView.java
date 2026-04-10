@@ -74,12 +74,14 @@ public class MainView extends VerticalLayout {
                     Notification.show("Syötä nimesi");
                     return;
                 }
-                repo.findByPassword(passwordField.getValue()).ifPresentOrElse(
+                repo.findById(passwordField.getValue()).ifPresentOrElse(
                         competition -> {
                             saveUserName();
                             savePassword(passwordField.getValue());
-                            getUI().ifPresent(ui ->
-                                    ui.navigate(DnsView.class, competition.getId()));
+                            userSession.setCompetitionId(competition.getCompetitionId());
+                            getUI().ifPresent(ui -> ui.navigate(DnsView.class)
+                                    .ifPresent(view -> view.setCompetition(
+                                            competition.getCompetitionId())));
                         },
                         () -> Notification.show("Väärä salasana")
                 );
@@ -115,19 +117,21 @@ public class MainView extends VerticalLayout {
                     return;
                 }
 
-                if (repo.findById(selected.eventId()).isPresent()) {
-                    Notification.show("Kilpailu on jo luotu");
+                if (repo.findById(password.trim()).isPresent()) {
+                    Notification.show("Salasana on jo käytössä");
                     return;
                 }
 
                 var competition = new Competition();
-                competition.setId(selected.eventId());
+                competition.setCompetitionId(selected.eventId());
                 competition.setPassword(password.trim());
                 repo.save(competition);
 
                 saveUserName();
                 savePassword(password.trim());
-                getUI().ifPresent(ui -> ui.navigate(DnsView.class, competition.getId()));
+                userSession.setCompetitionId(selected.eventId());
+                getUI().ifPresent(ui -> ui.navigate(DnsView.class)
+                        .ifPresent(view -> view.setCompetition(selected.eventId())));
             });
             add(combo, passwordField, createButton);
         }

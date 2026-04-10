@@ -2,6 +2,7 @@ package com.example.dns.ui;
 
 import com.example.dns.TestcontainersConfiguration;
 import com.example.dns.domain.CompetitionRepository;
+import com.example.dns.domain.DnsEntryRepository;
 import com.example.dns.service.DnsService;
 import com.example.dns.service.UserSession;
 import com.vaadin.browserless.VaadinTestApplicationContext;
@@ -37,19 +38,24 @@ class DnsViewTest {
     @Autowired
     DnsService dnsService;
 
+    @Autowired
+    DnsEntryRepository dnsEntryRepository;
+
     VaadinTestApplicationContext app;
     VaadinTestUiContext ui;
 
     @BeforeEach
     void setUp() {
+        dnsEntryRepository.deleteAll();
+        dnsService.clearCache();
         var routes = new Routes().autoDiscoverViews(MainView.class.getPackageName());
         app = VaadinTestApplicationContext.forSpring(routes, springContext);
 
         // Create competition in DB
         var competition = new com.example.dns.domain.Competition();
-        competition.setId(COMPETITION_ID);
+        competition.setCompetitionId(COMPETITION_ID);
         competition.setPassword("test123");
-        if (competitionRepository.findById(COMPETITION_ID).isEmpty()) {
+        if (competitionRepository.findById("test123").isEmpty()) {
             competitionRepository.save(competition);
         }
 
@@ -63,10 +69,13 @@ class DnsViewTest {
     @AfterEach
     void tearDown() {
         app.close();
+        dnsService.clearCache();
     }
 
     private DnsView navigateToDns() {
-        return ui.navigate(DnsView.class, COMPETITION_ID);
+        DnsView view = ui.navigate(DnsView.class);
+        view.setCompetition(COMPETITION_ID);
+        return view;
     }
 
     @Test
@@ -374,5 +383,111 @@ class DnsViewTest {
         assertTrue(card.isStarted(), "Card should remain started after cancel");
         assertTrue(dnsService.isStarted(COMPETITION_ID, bib),
                 "DnsService should still show started");
+    }
+
+    // --- Multi-user signal synchronization ---
+
+    @Test
+    void markingStarted_propagatesToOtherUserViaSignal() {
+        // Both users open the same competition
+        DnsView view1 = navigateToDns();
+
+        VaadinTestUiContext ui2 = app.newUser().newWindow();
+        DnsView view2 = ui2.navigate(DnsView.class);
+        view2.setCompetition(COMPETITION_ID);
+
+        // Pick same runner from both views
+        ui.activate();
+        RunnerCard card1 = view1.getSlotsByTime().values().iterator().next()
+                .getRunnerCards().getFirst();
+        int bib = card1.getBibNumber();
+
+        ui2.activate();
+        RunnerCard card2 = view2.getSlotsByTime().values().iterator().next()
+                .getRunnerCards().stream()
+                .filter(c -> c.getBibNumber() == bib)
+                .findFirst().orElseThrow();
+
+        assertFalse(card1.isStarted());
+        assertFalse(card2.isStarted());
+
+        // User 1 marks the runner
+        ui.activate();
+        view1.onCardClicked(card1);
+        assertTrue(card1.isStarted(), "User 1 card should be started");
+
+        // Verify signal state is shared
+        assertTrue(dnsService.isStarted(COMPETITION_ID, bib),
+                "DnsService signal should reflect started state");
+
+        // User 2 syncs from shared signal — should see the change
+        ui2.activate();
+        view2.syncCardsFromSignal();
+        assertTrue(card2.isStarted(),
+                "User 2 card should be started via shared signal");
+    }
+
+    @Test
+    void unmarking_propagatesToOtherUserViaSignal() {
+        // Both users open the same competition
+        DnsView view1 = navigateToDns();
+
+        VaadinTestUiContext ui2 = app.newUser().newWindow();
+        DnsView view2 = ui2.navigate(DnsView.class);
+        view2.setCompetition(COMPETITION_ID);
+
+        // Pick same runner
+        ui.activate();
+        RunnerCard card1 = view1.getSlotsByTime().values().iterator().next()
+                .getRunnerCards().getFirst();
+        int bib = card1.getBibNumber();
+
+        view1.onCardClicked(card1);
+
+        ui2.activate();
+        RunnerCard card2 = view2.getSlotsByTime().values().iterator().next()
+                .getRunnerCards().stream()
+                .filter(c -> c.getBibNumber() == bib)
+                .findFirst().orElseThrow();
+        view2.syncCardsFromSignal();
+        assertTrue(card2.isStarted(), "User 2 should see runner as started");
+
+        // User 1 unmarks via confirm dialog
+        ui.activate();
+        view1.onCardClicked(card1);
+        List<ConfirmDialog> dialogs = ui.get(ConfirmDialog.class).all();
+        assertFalse(dialogs.isEmpty());
+        ComponentUtil.fireEvent(dialogs.getFirst(),
+                new ConfirmDialog.ConfirmEvent(dialogs.getFirst(), false));
+        assertFalse(card1.isStarted(), "User 1 card should be unmarked");
+
+        // User 2 syncs from shared signal
+        ui2.activate();
+        view2.syncCardsFromSignal();
+        assertFalse(card2.isStarted(),
+                "User 2 card should be unmarked via shared signal");
+    }
+
+    @Test
+    void newUser_seesExistingStartedState() {
+        // User 1 marks a runner
+        DnsView view1 = navigateToDns();
+        RunnerCard card1 = view1.getSlotsByTime().values().iterator().next()
+                .getRunnerCards().getFirst();
+        int bib = card1.getBibNumber();
+        view1.onCardClicked(card1);
+
+        // User 2 opens the same competition later
+        VaadinTestUiContext ui2 = app.newUser().newWindow();
+        DnsView view2 = ui2.navigate(DnsView.class);
+        view2.setCompetition(COMPETITION_ID);
+
+        RunnerCard card2 = view2.getSlotsByTime().values().iterator().next()
+                .getRunnerCards().stream()
+                .filter(c -> c.getBibNumber() == bib)
+                .findFirst().orElseThrow();
+
+        assertTrue(card2.isStarted(),
+                "New user should see previously marked runner as started");
     }
 }

@@ -9,11 +9,16 @@ import org.springframework.data.relational.core.mapping.Table;
 public class Competition implements Persistable<String> {
 
     @Id
-    private String id;
     private String password;
+    private String competitionId;
 
     @Transient
     private boolean isNew = true;
+
+    @Override
+    public String getId() {
+        return password;
+    }
 
     @Override
     public boolean isNew() {
@@ -24,19 +29,19 @@ public class Competition implements Persistable<String> {
         this.isNew = false;
     }
 
-    public String getId() {
-        return id;
-    }
-
-    public void setId(String id) {
-        this.id = id;
-    }
-
     public String getPassword() {
         return password;
     }
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public String getCompetitionId() {
+        return competitionId;
+    }
+
+    public void setCompetitionId(String competitionId) {
+        this.competitionId = competitionId;
     }
 }

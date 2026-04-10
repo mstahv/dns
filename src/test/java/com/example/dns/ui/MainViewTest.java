@@ -48,16 +48,15 @@ class MainViewTest {
         admin.navigate(MainView.class);
 
         // Create competition directly via repository (ComboBox needs tulospalvelu data)
+        competitionRepository.deleteById("salasana123");
         var competition = new com.example.dns.domain.Competition();
-        competition.setId("2026_test");
+        competition.setCompetitionId("2026_test");
         competition.setPassword("salasana123");
         competitionRepository.save(competition);
 
         // Verify competition was persisted
-        assertTrue(competitionRepository.findById("2026_test").isPresent(),
-                "Competition should be saved to database");
-        assertTrue(competitionRepository.findByPassword("salasana123").isPresent(),
-                "Competition should be findable by password");
+        assertTrue(competitionRepository.findById("salasana123").isPresent(),
+                "Competition should be findable by password (PK)");
 
         // Another user logs in with the competition password
         VaadinTestUiContext staffUser = app.newUser().newWindow();

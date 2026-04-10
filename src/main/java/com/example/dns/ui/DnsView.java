@@ -7,9 +7,9 @@ import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.confirmdialog.ConfirmDialog;
 import com.vaadin.flow.component.html.H1;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
-import com.vaadin.flow.router.BeforeEvent;
-import com.vaadin.flow.router.HasUrlParameter;
+import com.vaadin.flow.dom.ElementEffect;
 import com.vaadin.flow.router.Route;
+import com.vaadin.flow.signals.shared.SharedNumberSignal;
 import org.orienteering.datastandard._3.StartList;
 import org.vaadin.firitin.util.IntersectionObserver;
 
@@ -18,6 +18,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 @Route(value = "dns")
-public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
+public class DnsView extends VerticalLayout {
 
     static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
     private static final int INITIAL_SLOTS = 10;
@@ -36,10 +37,11 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
     private final UserSession userSession;
     private final Map<LocalTime, StartTimeSlot> slotsByTime = new LinkedHashMap<>();
     private final List<StartTimeSlot> slotList = new ArrayList<>();
+    private final Map<Integer, RunnerCard> cardsByBib = new HashMap<>();
     private final Set<String> allStartPlaces = new TreeSet<>();
 
     private String competitionId;
-    private Set<Integer> startedBibs;
+    private SharedNumberSignal changeSignal;
     private int materializedCount;
     private Set<String> selectedStartPlaces = Set.of();
     private String nameFilter = "";
@@ -56,12 +58,12 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
         getStyle().set("--vaadin-card-title-font-size", "var(--aura-font-size-xl)");
     }
 
-    @Override
-    public void setParameter(BeforeEvent event, String competitionId) {
+    public void setCompetition(String competitionId) {
         this.competitionId = competitionId;
         removeAll();
         slotsByTime.clear();
         slotList.clear();
+        cardsByBib.clear();
         allStartPlaces.clear();
         materializedCount = 0;
 
@@ -72,7 +74,7 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
             return;
         }
 
-        startedBibs = dnsService.getStartedBibs(competitionId);
+        changeSignal = dnsService.getChangeSignal(competitionId);
 
         var sortedTimes = new TreeMap<LocalTime, StartTimeSlot>();
         for (var classStart : startList.getClassStart()) {
@@ -118,21 +120,37 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
         slotList.addAll(sortedTimes.values());
         slotList.forEach(this::add);
 
-        // Materialize first batch immediately
         materializeMore(INITIAL_SLOTS);
     }
 
     private void materializeMore(int targetTotal) {
+        // Get current started bibs from signal
+        Set<Integer> startedBibs = dnsService.getStartedBibs(competitionId);
+
         int end = Math.min(targetTotal, slotList.size());
         int previousCount = materializedCount;
         for (int i = materializedCount; i < end; i++) {
             slotList.get(i).materialize(competitionId, dnsService, startedBibs,
                     this::onCardClicked);
+            // Register cards for signal-driven updates
+            for (RunnerCard card : slotList.get(i).getRunnerCards()) {
+                cardsByBib.put(card.getBibNumber(), card);
+            }
         }
         materializedCount = Math.max(materializedCount, end);
 
         for (int i = previousCount; i < materializedCount; i++) {
             applyFiltersToSlot(slotList.get(i));
+        }
+    }
+
+    public void syncCardsFromSignal() {
+        for (var entry : cardsByBib.entrySet()) {
+            boolean shouldBeStarted = dnsService.isStarted(competitionId, entry.getKey());
+            RunnerCard card = entry.getValue();
+            if (card.isStarted() != shouldBeStarted) {
+                card.setStarted(shouldBeStarted);
+            }
         }
     }
 
@@ -181,6 +199,15 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
         super.onAttach(attachEvent);
         findAncestor(TopLayout.class).initFilters(this);
         observeUnmaterializedSlots();
+
+        // SharedNumberSignal increments on every mark/unmark from any user.
+        // ElementEffect triggers syncCardsFromSignal when the signal changes.
+        if (changeSignal != null) {
+            ElementEffect.effect(getElement(), () -> {
+                changeSignal.get();
+                getUI().ifPresent(currentUi -> currentUi.access(this::syncCardsFromSignal));
+            });
+        }
     }
 
     private void observeUnmaterializedSlots() {
@@ -200,6 +227,10 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
     // Exposed for tests
     void onVisibleSlotChanged(int slotIndex) {
         ensureMaterializedFrom(slotIndex);
+    }
+
+    Map<Integer, RunnerCard> getCardsByBib() {
+        return cardsByBib;
     }
 
     public Map<LocalTime, StartTimeSlot> getSlotsByTime() {
@@ -238,7 +269,6 @@ public class DnsView extends VerticalLayout implements HasUrlParameter<String> {
         this.showStarted = showStarted;
         this.showNotStarted = showNotStarted;
 
-        // Text search needs all slots materialized
         if (!nameFilter.isEmpty() || !numberFilter.isEmpty()) {
             materializeMore(slotList.size());
         }

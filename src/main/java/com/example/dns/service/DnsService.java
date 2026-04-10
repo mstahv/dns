@@ -2,6 +2,7 @@ package com.example.dns.service;
 
 import com.example.dns.domain.DnsEntry;
 import com.example.dns.domain.DnsEntryRepository;
+import com.vaadin.flow.signals.shared.SharedNumberSignal;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -15,12 +16,19 @@ import java.util.stream.Collectors;
 public class DnsService {
 
     private final DnsEntryRepository repository;
-
-    // competitionId -> set of started bib numbers
     private final Map<String, Set<Integer>> startedCache = new ConcurrentHashMap<>();
+    private final Map<String, SharedNumberSignal> changeCounters = new ConcurrentHashMap<>();
 
     public DnsService(DnsEntryRepository repository) {
         this.repository = repository;
+    }
+
+    /**
+     * Returns a shared signal that increments on every change.
+     * UI views can subscribe to this to react to changes from other users.
+     */
+    public SharedNumberSignal getChangeSignal(String competitionId) {
+        return changeCounters.computeIfAbsent(competitionId, k -> new SharedNumberSignal());
     }
 
     public Set<Integer> getStartedBibs(String competitionId) {
@@ -36,6 +44,8 @@ public class DnsService {
         entry.setRegisteredAt(LocalDateTime.now());
         entry.setRegisteredBy(registeredBy);
         repository.save(entry);
+
+        getChangeSignal(competitionId).incrementBy(1);
     }
 
     public void unmarkStarted(String competitionId, int bibNumber) {
@@ -45,6 +55,8 @@ public class DnsService {
                 .filter(e -> e.getCompetitorNumber() == bibNumber)
                 .findFirst()
                 .ifPresent(repository::delete);
+
+        getChangeSignal(competitionId).incrementBy(1);
     }
 
     public boolean isStarted(String competitionId, int bibNumber) {
@@ -55,6 +67,11 @@ public class DnsService {
         return repository.findByCompetitionId(competitionId).stream()
                 .filter(e -> e.getCompetitorNumber() == bibNumber)
                 .findFirst();
+    }
+
+    public void clearCache() {
+        startedCache.clear();
+        changeCounters.clear();
     }
 
     private Set<Integer> loadFromDb(String competitionId) {

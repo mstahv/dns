@@ -17,6 +17,7 @@ Suunnistuskilpailun DNS-kirjaussovellus. Vaadin 25.1.1, Spring Boot 4.0.4, Sprin
 - **browserless-test projektista on käytössä paranneltu versio. Hyödynnetään sen ominaisuuksia: kuvaavampi methodi komponettien etsimiseen (get vs $) ja VaadinTestApplicationContext, jonka kautta voi luoda useampia käyttäjiä ja testin ei ole pakko periä yläluokasta. Käytetään näitä hyödyksi.**
 - Muutoksia ja parannuksia tehdessä, pyritään parantamaan/ylläpitämään testejä, jotta ne kattavat tarkentuneet vaatimukset.
 - getElement() ja executeJs metodit ovat merkkejä että tehdään "componentti/webbitason" säätöjä. Niitä ei juuri saisi näkyä varsinaisessa ohjelmistokoodissa. Ennen niiden käyttä tulisi puntaroida onko selain/DOM muutoksen tekemiseen jotain valmista paremmin tyypitettyä Java APIa tai add-onia Directoryssä. Esim ei näin: nameField.getElement().executeJs("window.localStorage.setItem($0, $1)", LOCAL_STORAGE_KEY, name) vaan käytä WebStorage luokkaa.
+- AppShellConfigurator. Lähtökohtaisesti SpringBoot sovelluksessa ei ole hyvä tapa tehdä Spring Boot *Application luokkaa implementoimaan AppShellConfigurator, vaan parempi luoda oma luokka, esim. AppShell nimellä. Vaadin specificet "app shell" annotaatiot sitten siihen eikä sotkemaan spring sovelluksen perus configraatio juurta.
 
 
 ## Arkkitehtuuri

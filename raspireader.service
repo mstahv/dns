@@ -1,0 +1,19 @@
+[Unit]
+Description=DNS RaspiReader - Emit 250 Card Reader
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/raspireader
+ExecStart=/usr/bin/java -jar /opt/raspireader/raspireader.jar --url http://m4m.local:8080 --password changeme
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Grant access to serial ports and GPIO
+SupplementaryGroups=dialout gpio
+
+[Install]
+WantedBy=multi-user.target

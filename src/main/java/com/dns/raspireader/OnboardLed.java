@@ -1,25 +1,33 @@
 package com.dns.raspireader;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.logging.Logger;
 
 /**
  * Controls the Raspberry Pi onboard ACT LED via sysfs.
  * Works without Pi4J — just needs write access to /sys/class/leds/ACT/.
  * The trigger is set to "none" for manual control, and restored on shutdown.
+ *
+ * Connection status indicator:
+ * - WebSocket connected: double flash every 5 seconds
+ * - No network: continuous blinking
  */
 public class OnboardLed {
 
     private static final Logger LOG = Logger.getLogger(OnboardLed.class.getName());
     private static final String[] LED_NAMES = {"ACT", "ACTLED", "led0", "led1"};
-    private static final long BLINK_INTERVAL_MS = 200;
-    private static final long BLINK_DURATION_MS = 1000;
+    private static final long STATUS_CHECK_INTERVAL_MS = 5000;
+    private static final long FLASH_ON_MS = 80;
+    private static final long FLASH_GAP_MS = 120;
+    private static final long CONTINUOUS_BLINK_MS = 300;
 
     private final Path ledTrigger;
     private final Path ledBrightness;
@@ -30,9 +38,10 @@ public class OnboardLed {
     });
 
     private String originalTrigger;
+    private ScheduledFuture<?> statusTask;
     private ScheduledFuture<?> blinkTask;
-    private ScheduledFuture<?> stopTask;
     private boolean ledState;
+    private BooleanSupplier wsConnectedCheck;
 
     public OnboardLed() throws IOException {
         Path found = findLed();
@@ -66,19 +75,50 @@ public class OnboardLed {
         return null;
     }
 
-    public synchronized void blink() {
-        stopBlinking();
-        blinkTask = scheduler.scheduleAtFixedRate(() -> {
-            ledState = !ledState;
-            write(ledState);
-        }, 0, BLINK_INTERVAL_MS, TimeUnit.MILLISECONDS);
-        stopTask = scheduler.schedule(this::stopBlinking, BLINK_DURATION_MS, TimeUnit.MILLISECONDS);
+    /**
+     * Start monitoring connection status and indicating it via the onboard LED.
+     * @param wsConnected supplier that returns true when WebSocket is connected
+     */
+    public void startStatusIndicator(BooleanSupplier wsConnected) {
+        this.wsConnectedCheck = wsConnected;
+        statusTask = scheduler.scheduleAtFixedRate(this::updateStatus,
+                0, STATUS_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
-    public synchronized void extendBlinking() {
-        if (stopTask != null && !stopTask.isDone()) {
-            stopTask.cancel(false);
-            stopTask = scheduler.schedule(this::stopBlinking, BLINK_DURATION_MS, TimeUnit.MILLISECONDS);
+    private void updateStatus() {
+        stopBlinking();
+        if (wsConnectedCheck != null && wsConnectedCheck.getAsBoolean()) {
+            // Connected: double flash
+            doubleFlash();
+        } else if (!hasNetwork()) {
+            // No network: continuous blink
+            blinkTask = scheduler.scheduleAtFixedRate(() -> {
+                ledState = !ledState;
+                write(ledState);
+            }, 0, CONTINUOUS_BLINK_MS, TimeUnit.MILLISECONDS);
+        } else {
+            // Network OK but WS disconnected: single flash
+            singleFlash();
+        }
+    }
+
+    private void doubleFlash() {
+        scheduler.schedule(() -> write(true), 0, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> write(false), FLASH_ON_MS, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> write(true), FLASH_ON_MS + FLASH_GAP_MS, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> write(false), FLASH_ON_MS * 2 + FLASH_GAP_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void singleFlash() {
+        scheduler.schedule(() -> write(true), 0, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> write(false), FLASH_ON_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private static boolean hasNetwork() {
+        try {
+            return InetAddress.getByName("1.1.1.1").isReachable(2000);
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -86,10 +126,6 @@ public class OnboardLed {
         if (blinkTask != null) {
             blinkTask.cancel(false);
             blinkTask = null;
-        }
-        if (stopTask != null) {
-            stopTask.cancel(false);
-            stopTask = null;
         }
         write(false);
     }
@@ -103,6 +139,7 @@ public class OnboardLed {
     }
 
     public void shutdown() {
+        if (statusTask != null) statusTask.cancel(false);
         stopBlinking();
         scheduler.shutdownNow();
         // Restore original trigger

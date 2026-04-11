@@ -89,7 +89,6 @@ public class RaspiReader {
         Emit250Protocol protocol = new Emit250Protocol();
 
         final LedController ledRef = led;
-        final OnboardLed onboardLedRef = onboardLed;
         final boolean emitCheckMode = emitCheck;
 
         // Derive WebSocket URL from base URL
@@ -123,6 +122,11 @@ public class RaspiReader {
                 });
 
         ws.connect();
+
+        // Start onboard LED connection status indicator
+        if (onboardLed != null) {
+            onboardLed.startStatusIndicator(ws::isConnected);
+        }
 
         // Configure and open serial port
         port.setComPortParameters(BAUD_RATE, DATA_BITS, STOP_BITS, PARITY);
@@ -174,7 +178,6 @@ public class RaspiReader {
                         boolean timeoutExceeded = (now - lastReadTime) > REREAD_TIMEOUT_MS;
                         if (!differentCardInBetween && !timeoutExceeded) {
                             if (ledRef != null) ledRef.extendBlinking();
-                            if (onboardLedRef != null) onboardLedRef.extendBlinking();
                             continue;
                         }
                     }
@@ -221,9 +224,6 @@ public class RaspiReader {
                                 }
                             }
                         }
-                    }
-                    if (onboardLedRef != null) {
-                        onboardLedRef.blink();
                     }
                 }
             } catch (Exception e) {

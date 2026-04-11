@@ -33,6 +33,16 @@ After each card read, LEDs indicate the result:
 | Kortti tuntematon (`found:false`) | Palaa jatkuvana | Vilkkuu | Korttia ei löydy järjestelmästä |
 | Serverivirhe / ei vastausta | Pois | Vilkkuu | Yhteysongelma tai muu virhe |
 
+### Onboard ACT LED (yhteystila)
+
+Raspberry Pi:n levyllä oleva ACT LED indikoi yhteystilaa:
+
+| ACT LED | Merkitys |
+|---------|----------|
+| Kaksoissvälähdys 5s välein | WebSocket-yhteys serveriin OK |
+| Yksittäinen välähdys 5s välein | Verkko toimii, mutta WS-yhteys poikki |
+| Jatkuva vilkutus | Ei verkkoyhteyttä lainkaan |
+
 ```
 Raspberry Pi                  LEDs
 -----------                  -----

@@ -27,10 +27,11 @@ public class RaspiReader {
     private static volatile int lastDisplayedCard = -1;
 
     public static void main(String[] args) {
-        String baseUrl = "http://m4m.local:8080";
+        String baseUrl = "https://dns.virit.in";
         String machineId = getMachineId();
         String serialDevice = "";
         String logPath = "/var/log/raspireader/reads.log";
+        boolean emitCheck = false;
 
         // Parse command line arguments
         for (int i = 0; i < args.length; i++) {
@@ -39,6 +40,7 @@ public class RaspiReader {
                 case "--machine-id" -> machineId = args[++i];
                 case "--serial" -> serialDevice = args[++i];
                 case "--log" -> logPath = args[++i];
+                case "--emitcheck" -> emitCheck = true;
                 case "--help" -> {
                     printHelp();
                     return;
@@ -47,6 +49,7 @@ public class RaspiReader {
         }
 
         LOG.info("DNS RaspiReader starting...");
+        if (emitCheck) LOG.info("  Mode: EMITCHECK (read-only, no start registration)");
         LOG.info("  Server URL: " + baseUrl);
         LOG.info("  Machine ID: " + machineId);
         LOG.info("  Log file: " + logPath);
@@ -87,6 +90,7 @@ public class RaspiReader {
 
         final LedController ledRef = led;
         final OnboardLed onboardLedRef = onboardLed;
+        final boolean emitCheckMode = emitCheck;
 
         // Derive WebSocket URL from base URL
         String wsUrl = baseUrl.replaceFirst("^http", "ws") + "/ws/machine-reading";
@@ -182,33 +186,44 @@ public class RaspiReader {
                     LOG.info("Card read: " + cardNumber);
                     readLogger.logRead(cardNumber);
 
-                    // Immediate LED feedback from local startlist cache
-                    if (ledRef != null) {
-                        var cached = startlistCache.lookup(cardNumber);
-                        if (cached != null) {
-                            showFoundLed(ledRef, cached.startTime());
-                        } else {
-                            ledRef.greenOnBlinkRed();
+                    if (emitCheckMode) {
+                        // Emitcheck: read-only, just check if card is in startlist
+                        if (ledRef != null) {
+                            var cached = startlistCache.lookup(cardNumber);
+                            if (cached != null) {
+                                ledRef.blinkGreen();
+                            } else {
+                                ledRef.blinkRed();
+                            }
+                        }
+                    } else {
+                        // Normal mode: immediate LED feedback from cache, then send to server
+                        if (ledRef != null) {
+                            var cached = startlistCache.lookup(cardNumber);
+                            if (cached != null) {
+                                showFoundLed(ledRef, cached.startTime());
+                            } else {
+                                ledRef.greenOnBlinkRed();
+                            }
+                        }
+
+                        // Send via WebSocket (async) — server response may override LED
+                        if (!ws.sendReading(cardNumber)) {
+                            buffer.add(cardNumber);
+                            LOG.info("Buffered card (WS disconnected): " + cardNumber);
+                        }
+
+                        // Flush buffer if connected
+                        if (ws.isConnected() && buffer.hasData()) {
+                            for (int buffered : buffer.snapshot()) {
+                                if (ws.sendReading(buffered)) {
+                                    buffer.removeAll(java.util.List.of(buffered));
+                                }
+                            }
                         }
                     }
                     if (onboardLedRef != null) {
                         onboardLedRef.blink();
-                    }
-
-                    // Send via WebSocket (async) — server response may override LED
-                    if (!ws.sendReading(cardNumber)) {
-                        // WebSocket not connected, buffer for later
-                        buffer.add(cardNumber);
-                        LOG.info("Buffered card (WS disconnected): " + cardNumber);
-                    }
-
-                    // Flush buffer if connected
-                    if (ws.isConnected() && buffer.hasData()) {
-                        for (int buffered : buffer.snapshot()) {
-                            if (ws.sendReading(buffered)) {
-                                buffer.removeAll(java.util.List.of(buffered));
-                            }
-                        }
                     }
                 }
             } catch (Exception e) {
@@ -271,11 +286,12 @@ public class RaspiReader {
     }
 
     private static String getMachineId() {
+        String hostname = getHostname();
         // Try to read machine ID from /etc/machine-id
         try {
-            return java.nio.file.Files.readString(Path.of("/etc/machine-id")).trim();
+            return hostname + "-" + java.nio.file.Files.readString(Path.of("/etc/machine-id")).trim();
         } catch (Exception e) {
-            // Fallback: use MAC address or hostname
+            // Fallback: hostname + MAC address
             try {
                 var interfaces = java.net.NetworkInterface.getNetworkInterfaces();
                 while (interfaces.hasMoreElements()) {
@@ -286,12 +302,20 @@ public class RaspiReader {
                         for (byte b : mac) {
                             sb.append(String.format("%02x", b));
                         }
-                        return sb.toString();
+                        return hostname + "-" + sb;
                     }
                 }
             } catch (Exception ex) {
                 // ignore
             }
+            return hostname;
+        }
+    }
+
+    private static String getHostname() {
+        try {
+            return java.net.InetAddress.getLocalHost().getHostName();
+        } catch (Exception e) {
             return "unknown";
         }
     }
@@ -303,11 +327,13 @@ public class RaspiReader {
                 Usage: java -jar raspireader.jar [options]
 
                 Options:
-                  --url <url>          Server URL (default: http://m4m.local:8080)
+                  --url <url>          Server URL (default: https://dns.virit.in)
                                        WebSocket connects to ws://<host>:<port>/ws/machine-reading
                   --machine-id <id>    Machine identifier (default: auto-detect from MAC/machine-id)
                   --serial <device>    Serial port device (default: auto-detect /dev/ttyUSB*)
                   --log <path>         Log file path (default: /var/log/raspireader/reads.log)
+                  --emitcheck          Emit check mode: read-only, no start registration.
+                                       Green blink = card found, red blink = not found.
                   --help               Show this help
                 """);
     }

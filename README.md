@@ -84,20 +84,33 @@ java -jar target/raspireader-1.0-SNAPSHOT.jar [options]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--url <url>` | Server URL | `http://m4m.local:8080` |
-| `--password <pwd>` | Competition password (`X-Competition-Password`) | (empty) |
-| `--machine-id <id>` | Machine identifier (`X-Machine-Id`) | Auto-detect from MAC or `/etc/machine-id` |
-| `--serial <device>` | Serial port device path | Auto-detect (`/dev/ttyUSB*`) |
-| `--log <path>` | Log file path | `/var/log/raspireader/reads.log` |
+| `--url <url>` | Server URL (WebSocket johdetaan automaattisesti) | `https://dns.virit.in` |
+| `--machine-id <id>` | Koneen tunniste | Auto-detect: `<hostname>-<machine-id/MAC>` |
+| `--serial <device>` | Sarjaportti | Auto-detect (`/dev/ttyUSB*`) |
+| `--log <path>` | Lokitiedoston polku | `/var/log/raspireader/reads.log` |
+| `--emitcheck` | Emit-kortin tarkistustila (read-only) | Pois |
 
 ### Example
 
 ```bash
-java -jar raspireader.jar \
-  --url http://192.168.1.100:8080 \
-  --password kilpailusana123 \
-  --serial /dev/ttyUSB0
+java -jar raspireader.jar --serial /dev/ttyUSB0
 ```
+
+### Emitcheck-tila
+
+Itsepalvelupiste kilpailukeskukseen, jossa juoksija voi tarkistaa emit-korttinsa toimivuuden ja löytymisen kilpailijatietokannasta.
+
+```bash
+java -jar raspireader.jar --emitcheck
+```
+
+Emitcheck-tilassa:
+- Lukija yhdistää serveriin WebSocketilla ja vastaanottaa lähtölistan
+- Kortteja **ei lähetetä serverille** — juoksijaa ei kirjata lähteneeksi
+- Vihreä vilkkuu = kortti löytyy järjestelmästä
+- Punainen vilkkuu = korttia ei löydy
+
+Tarkistuspisteen viereen tulostetaan ohjelappu (`docs/emitcheck-ohje.svg`).
 
 ## Install as systemd service
 
@@ -160,3 +173,78 @@ echo 'export JAVA_HOME=/opt/jdk-25' | sudo tee /etc/profile.d/java.sh
 echo 'export PATH=$JAVA_HOME/bin:$PATH' | sudo tee -a /etc/profile.d/java.sh
 source /etc/profile.d/java.sh
 ```
+
+## Lukijoiden kloonaus ja käyttöönotto
+
+Kun "master"-lukija on konfiguroitu valmiiksi (JDK, raspireader, systemd-palvelu, WiFi-asetukset), uudet lukijat luodaan kloonaamalla SD-kortti ja yksilöimällä kone.
+
+### 1. WiFi-verkkojen lisäys master-lukijaan
+
+Lisää kilpailupaikkojen WiFi-verkot etukäteen. NetworkManager tallentaa ne automaattisesti kaikille klooneille:
+
+```bash
+# Lisää verkko
+sudo nmcli device wifi connect "KilpailunWiFi" password "salasana123"
+
+# Listaa tallennetut verkot
+nmcli connection show
+
+# Poista vanha verkko
+nmcli connection delete "VanhaVerkko"
+
+# Aseta prioriteetti (korkeampi yhdistää ensin)
+nmcli connection modify "KilpailunWiFi" connection.autoconnect-priority 10
+```
+
+Vinkki: lisää yleisimmät kilpailupaikkojen verkot valmiiksi, niin lukijat yhdistävät automaattisesti.
+
+### 2. SD-kortin kloonaus rpi-clone:lla
+
+rpi-clone kopioi käynnissä olevan järjestelmän toiselle SD-kortille USB-adapterilla:
+
+```bash
+# Asenna rpi-clone (kerran master-lukijaan)
+git clone https://github.com/billw2/rpi-clone.git
+sudo cp rpi-clone/rpi-clone /usr/local/sbin/
+
+# Aseta kohde-SD-kortti USB-adapteriin ja etsi laite
+lsblk
+
+# Kloonaa (tyypillisesti /dev/sda)
+sudo rpi-clone sda
+```
+
+Kloonaus kopioi kaiken: käyttöjärjestelmän, JDK:n, raspireader-sovelluksen, WiFi-asetukset ja systemd-palvelun.
+
+### 3. Kloonin yksilöinti
+
+Käynnistä klooni ja tee seuraavat toimenpiteet:
+
+```bash
+# Vaihda hostname (esim. ereader1, ereader2, ...)
+sudo hostnamectl set-hostname ereader2
+
+# Generoi uudet SSH-avaimet (klooni peri master-lukijan avaimet)
+sudo rm /etc/ssh/ssh_host_*
+sudo dpkg-reconfigure openssh-server
+sudo systemctl restart ssh
+
+# Generoi uusi machine-id
+sudo rm /etc/machine-id
+sudo systemd-machine-id-setup
+
+# Käynnistä uudelleen jotta kaikki muutokset aktivoituvat
+sudo reboot
+```
+
+Machine ID muodostuu automaattisesti muotoon `<hostname>-<machine-id>`, esim. `ereader2-a1b2c3...`, joten hostname ja machine-id:n uudelleengenerointi riittävät erottamaan lukijat hallintanäkymässä.
+
+### Pikaohje: uusi lukija 5 minuutissa
+
+1. Aseta tyhjä SD-kortti USB-adapteriin master-lukijaan
+2. `sudo rpi-clone sda`
+3. Siirrä SD-kortti uuteen lukijaan ja käynnistä
+4. `sudo hostnamectl set-hostname ereaderN`
+5. `sudo rm /etc/ssh/ssh_host_* && sudo dpkg-reconfigure openssh-server`
+6. `sudo rm /etc/machine-id && sudo systemd-machine-id-setup`
+7. `sudo reboot`

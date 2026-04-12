@@ -17,7 +17,7 @@ public class TopLayout extends MainLayout implements BeforeEnterObserver {
 
     @Override
     protected Object getDrawerHeader() {
-        return "DNS";
+        return "DNS }>";
     }
 
     @Override

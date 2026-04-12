@@ -113,7 +113,7 @@ public class MachineReadingService {
             reading.setMachine(machine);
             reading.setBib(bib);
             reading.setCc(cc != null ? String.valueOf(cc) : null);
-            reading.setReadAt(LocalDateTime.now());
+            reading.setReadAt(java.time.Instant.now());
 
             if (!cm.isApproved()) {
                 reading.setFound(false);

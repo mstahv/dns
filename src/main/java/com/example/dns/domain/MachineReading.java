@@ -10,7 +10,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Entity
 @Table(name = "machine_reading")
@@ -29,7 +29,7 @@ public class MachineReading {
 
     private Integer bib;
     private String cc;
-    private LocalDateTime readAt;
+    private Instant readAt;
 
     @Column(nullable = false)
     private boolean found;
@@ -74,11 +74,11 @@ public class MachineReading {
         this.cc = cc;
     }
 
-    public LocalDateTime getReadAt() {
+    public Instant getReadAt() {
         return readAt;
     }
 
-    public void setReadAt(LocalDateTime readAt) {
+    public void setReadAt(Instant readAt) {
         this.readAt = readAt;
     }
 

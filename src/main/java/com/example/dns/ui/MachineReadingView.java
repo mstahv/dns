@@ -22,6 +22,7 @@ import com.vaadin.flow.router.Route;
 import org.vaadin.firitin.appframework.MenuItem;
 import org.vaadin.firitin.util.BrowserPrompt;
 
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -31,7 +32,8 @@ import java.util.stream.Collectors;
 @MenuItem(icon = VaadinIcon.AUTOMATION)
 public class MachineReadingView extends VerticalLayout {
 
-    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss")
+            .withZone(ZoneId.systemDefault());
 
     private final MachineRepository machineRepository;
     private final CompetitionMachineRepository competitionMachineRepository;
@@ -181,7 +183,7 @@ public class MachineReadingView extends VerticalLayout {
         add(new H2("Lukuloki"));
 
         readingGrid = new Grid<>(MachineReading.class, false);
-        readingGrid.addColumn(r -> r.getReadAt() != null ? r.getReadAt().format(TIME_FMT) : "")
+        readingGrid.addColumn(r -> r.getReadAt() != null ? TIME_FMT.format(r.getReadAt()) : "")
                 .setHeader("Aika");
         readingGrid.addColumn(r -> r.getMachine().getMachineName()).setHeader("Kone");
         readingGrid.addColumn(MachineReading::getBib).setHeader("Nro");

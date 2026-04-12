@@ -1,0 +1,28 @@
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.slot-spinner {
+    width: 32px;
+    height: 32px;
+    margin: 16px auto;
+    border: 3px solid #e0e0e0;
+    border-top-color: #1976d2;
+    border-radius: 50%;
+    animation: spin 1.2s linear infinite;
+}
+
+/* Runner card states */
+vaadin-card.started {
+    background: #80cbc4;
+}
+
+vaadin-card.not-started {
+    background: white;
+}
+
+/* Past start time slot - applies warning to non-started cards inside */
+.past-slot vaadin-card.not-started {
+    background: #fff3e0;
+}

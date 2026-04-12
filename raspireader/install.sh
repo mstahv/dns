@@ -69,11 +69,14 @@ fi
 echo "Installing JAR..."
 cp "$JAR_FILE" "$INSTALL_DIR/raspireader.jar"
 
-# Install systemd service
-echo "Installing systemd service..."
+# Install systemd units
+echo "Installing systemd units..."
 cp "$REPO_DIR/raspireader/raspireader.service" /etc/systemd/system/
+cp "$REPO_DIR/raspireader/raspireader-update.service" /etc/systemd/system/
+cp "$REPO_DIR/raspireader/raspireader-update.path" /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable raspireader
+systemctl enable --now raspireader-update.path
 
 echo ""
 echo "=== Installation complete ==="

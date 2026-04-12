@@ -13,6 +13,9 @@ log() {
 
 log "OTA update started"
 
+# Remove trigger file so path unit can re-trigger next time
+rm -f "$INSTALL_DIR/update-requested"
+
 # 1. Stop the service (frees memory for build)
 log "Stopping $SERVICE service..."
 systemctl stop "$SERVICE" || true

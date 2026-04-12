@@ -1,0 +1,6 @@
+[Unit]
+Description=RaspiReader OTA Update
+
+[Service]
+Type=oneshot
+ExecStart=/opt/raspireader/repo/raspireader/update.sh

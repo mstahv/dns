@@ -383,22 +383,17 @@ public class RaspiReader {
     }
 
     private static void triggerOtaUpdate() {
-        LOG.info("Triggering OTA update via update.sh...");
+        LOG.info("Triggering OTA update...");
         try {
-            // Create a fully independent transient service unit via systemd-run.
-            // Without --scope, systemd-run returns immediately after starting
-            // the transient unit, so the update script survives even when
-            // systemctl stop raspireader kills this process.
-            new ProcessBuilder(
-                    "systemd-run",
-                    "--unit=raspireader-update",
-                    "--description=RaspiReader OTA Update",
-                    "/bin/bash", "/opt/raspireader/repo/raspireader/update.sh")
-                    .inheritIO()
-                    .start();
-            LOG.info("Update transient unit started, service will restart soon");
+            // Write a trigger file — systemd path unit (raspireader-update.path)
+            // watches for this file and starts raspireader-update.service,
+            // which is completely independent of this process.
+            java.nio.file.Files.writeString(
+                    Path.of("/opt/raspireader/update-requested"),
+                    java.time.Instant.now().toString());
+            LOG.info("Update trigger file written, systemd path unit will start update");
         } catch (Exception e) {
-            LOG.severe("Failed to launch update: " + e.getMessage());
+            LOG.severe("Failed to write update trigger: " + e.getMessage());
         }
     }
 

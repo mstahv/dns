@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for RaspiReader OTA update trigger
+
+[Path]
+PathExists=/opt/raspireader/update-requested
+
+[Install]
+WantedBy=multi-user.target

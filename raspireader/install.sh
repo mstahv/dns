@@ -73,23 +73,17 @@ cp "$JAR_FILE" "$INSTALL_DIR/raspireader.jar"
 echo "Installing systemd service..."
 cp "$REPO_DIR/raspireader/raspireader.service" /etc/systemd/system/
 systemctl daemon-reload
+systemctl enable raspireader
 
 echo ""
 echo "=== Installation complete ==="
 echo ""
-echo "Before starting, edit the service file to set your competition password:"
-echo "  sudo systemctl edit raspireader"
-echo ""
-echo "Or edit directly:"
-echo "  sudo nano /etc/systemd/system/raspireader.service"
-echo ""
-echo "Then start the service:"
-echo "  sudo systemctl enable raspireader"
-echo "  sudo systemctl start raspireader"
-echo ""
 echo "OTA updates can be triggered from the server admin UI,"
 echo "or manually: sudo $REPO_DIR/raspireader/update.sh"
 echo ""
-echo "View logs:"
+echo "View logs after reboot:"
 echo "  sudo journalctl -u raspireader -f"
 echo ""
+echo "Rebooting in 5 seconds..."
+sleep 5
+reboot

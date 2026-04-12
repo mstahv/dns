@@ -18,8 +18,9 @@ Laite tukee etäpäivityksiä serverin hallintanäkymästä. Päivitysnappi näk
 
 Päivitys:
 1. Serveri lähettää `{"type":"requestUpdate"}` WebSocketin kautta
-2. Laite käynnistää `update.sh`:n itsenäisenä systemd-yksikkönä (`raspireader-update.service`)
-3. Skripti pysäyttää lukijapalvelun, hakee uusimman koodin gitistä, buildaa ja käynnistää uudelleen
+2. Laite kirjoittaa lipputiedoston `/opt/raspireader/update-requested`
+3. systemd path-unit (`raspireader-update.path`) havaitsee tiedoston ja käynnistää `raspireader-update.service`
+4. Skripti poistaa lipun, pysäyttää lukijapalvelun, hakee uusimman koodin gitistä, buildaa ja käynnistää uudelleen
 
 Manuaalinen päivitys: `sudo /opt/raspireader/repo/raspireader/update.sh`
 

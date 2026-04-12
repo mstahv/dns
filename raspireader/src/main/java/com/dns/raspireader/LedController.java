@@ -31,13 +31,16 @@ public class LedController {
     });
 
     private static final long IDLE_TIMEOUT_MS = 20_000;
-    private static final long IDLE_HEARTBEAT_INTERVAL_MS = 5_000;
+    private static final long IDLE_HEARTBEAT_INTERVAL_MS = 10_000;
     private static final long DOUBLE_FLASH_MS = 80;
     private static final long DOUBLE_FLASH_GAP_MS = 120;
+
+    private static final long IDLE_BLINK_INTERVAL_MS = 1000;
 
     private ScheduledFuture<?> blinkTask;
     private ScheduledFuture<?> stopTask;
     private ScheduledFuture<?> idleTask;
+    private ScheduledFuture<?> idleBlinkTask;
     private volatile long lastActivityTime;
     private volatile java.util.function.BooleanSupplier connectedCheck;
 
@@ -54,20 +57,38 @@ public class LedController {
         this.connectedCheck = connected;
         this.lastActivityTime = System.currentTimeMillis();
         idleTask = scheduler.scheduleAtFixedRate(() -> {
-            if (blinkTask == null
-                    && System.currentTimeMillis() - lastActivityTime > IDLE_TIMEOUT_MS) {
-                if (connectedCheck.getAsBoolean()) {
-                    doubleFlash(greenLed);
-                } else {
-                    doubleFlash(redLed);
-                }
+            boolean idle = blinkTask == null
+                    && System.currentTimeMillis() - lastActivityTime > IDLE_TIMEOUT_MS;
+            if (idle && connectedCheck.getAsBoolean()) {
+                stopIdleBlink();
+                doubleFlash(greenLed);
+            } else if (idle && !connectedCheck.getAsBoolean()) {
+                startIdleBlink();
+            } else {
+                stopIdleBlink();
             }
         }, IDLE_HEARTBEAT_INTERVAL_MS, IDLE_HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void startIdleBlink() {
+        if (idleBlinkTask != null) return; // already blinking
+        greenLed.low();
+        idleBlinkTask = scheduler.scheduleAtFixedRate(
+                redLed::toggle, 0, IDLE_BLINK_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void stopIdleBlink() {
+        if (idleBlinkTask != null) {
+            idleBlinkTask.cancel(false);
+            idleBlinkTask = null;
+            redLed.low();
+        }
     }
 
     /** Record card activity — resets idle timer */
     public void recordActivity() {
         lastActivityTime = System.currentTimeMillis();
+        stopIdleBlink();
     }
 
     private void doubleFlash(DigitalOutput led) {
@@ -173,6 +194,7 @@ public class LedController {
             idleTask.cancel(false);
             idleTask = null;
         }
+        stopIdleBlink();
         stopBlinking();
         scheduler.shutdownNow();
     }

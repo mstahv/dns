@@ -355,13 +355,16 @@ public class RaspiReader {
     private static void triggerOtaUpdate() {
         LOG.info("Triggering OTA update via update.sh...");
         try {
-            // Run update script detached — it will stop this service, so we won't see the result
-            new ProcessBuilder("sudo", "/opt/raspireader/repo/raspireader/update.sh")
+            // Use systemd-run to escape this service's cgroup — otherwise
+            // systemctl stop raspireader kills update.sh too
+            new ProcessBuilder(
+                    "sudo", "systemd-run", "--scope",
+                    "/opt/raspireader/repo/raspireader/update.sh")
                     .redirectErrorStream(true)
                     .redirectOutput(ProcessBuilder.Redirect.appendTo(
                             new java.io.File("/var/log/raspireader/update.log")))
                     .start();
-            LOG.info("Update script launched, service will restart soon");
+            LOG.info("Update script launched in separate scope, service will restart soon");
         } catch (Exception e) {
             LOG.severe("Failed to launch update script: " + e.getMessage());
         }

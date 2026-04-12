@@ -261,13 +261,7 @@ public class MachineWebSocket {
                         String logContent = logsCallback.get();
                         WebSocket ws = webSocket;
                         if (ws != null && connected) {
-                            String escaped = logContent
-                                    .replace("\\", "\\\\")
-                                    .replace("\"", "\\\"")
-                                    .replace("\n", "\\n")
-                                    .replace("\r", "\\r")
-                                    .replace("\t", "\\t");
-                            ws.sendText("{\"type\":\"logs\",\"data\":\"" + escaped + "\"}", true);
+                            ws.sendText("{\"type\":\"logs\",\"data\":\"" + escapeJson(logContent) + "\"}", true);
                         }
                     } catch (Exception e) {
                         LOG.warning("Failed to collect/send logs: " + e.getMessage());
@@ -279,6 +273,30 @@ public class MachineWebSocket {
         } else {
             LOG.fine("Unknown message: " + message);
         }
+    }
+
+    static String escapeJson(String s) {
+        var sb = new StringBuilder(s.length() + 64);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"' -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\b' -> sb.append("\\b");
+                case '\f' -> sb.append("\\f");
+                default -> {
+                    if (c < 0x20) {
+                        sb.append(String.format("\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+                }
+            }
+        }
+        return sb.toString();
     }
 
     private void parseReadingResponse(String message) {

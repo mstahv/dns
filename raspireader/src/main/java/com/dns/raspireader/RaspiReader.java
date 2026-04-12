@@ -358,7 +358,7 @@ public class RaspiReader {
         var sb = new StringBuilder();
         try {
             var process = new ProcessBuilder(
-                    "journalctl", "-u", "raspireader", "-n", "200", "--no-pager")
+                    "journalctl", "-u", "raspireader", "-n", "100", "--no-pager")
                     .redirectErrorStream(true)
                     .start();
             sb.append(new String(process.getInputStream().readAllBytes()));
@@ -380,7 +380,7 @@ public class RaspiReader {
             sb.append("reads.log error: ").append(e.getMessage()).append("\n");
         }
         String result = sb.toString();
-        return result.length() > 64_000 ? result.substring(result.length() - 64_000) : result;
+        return result.length() > 32_000 ? result.substring(result.length() - 32_000) : result;
     }
 
     private static void triggerShutdown() {

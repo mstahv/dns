@@ -131,8 +131,7 @@ public class MachineReadingView extends VerticalLayout {
         String hash = parts[0];
         String date = parts.length > 1 ? parts[1] : "";
 
-        String label = date.isEmpty() ? "Online (" + hash + ")" : "Online (" + date + ")";
-        var link = new Anchor(GITHUB_COMMIT_URL + hash, label);
+        var link = new Anchor(GITHUB_COMMIT_URL + hash, "Online (" + hash + ")");
         link.setTarget("_blank");
         return link;
     }

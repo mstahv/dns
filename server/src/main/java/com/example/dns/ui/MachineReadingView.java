@@ -163,12 +163,14 @@ public class MachineReadingView extends VerticalLayout {
             addThemeVariants(ButtonVariant.TERTIARY);
             setTooltipText("Näytä koneen lokit");
             addClickListener(e -> {
+                var currentUI = e.getSource().getUI().orElse(null);
+                if (currentUI == null) return;
                 setEnabled(false);
                 webSocketHandler.requestLogs(machine).thenAccept(logContent ->
-                    getUI().ifPresent(ui -> ui.access(() -> {
+                    currentUI.access(() -> {
                         setEnabled(true);
                         new LogDialog(machine, logContent).open();
-                    }))
+                    })
                 );
             });
         }

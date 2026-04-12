@@ -5,12 +5,15 @@ import com.example.dns.service.DnsService;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.badge.Badge;
 import com.vaadin.flow.component.badge.BadgeVariant;
+import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.card.Card;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
+import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.component.textfield.TextArea;
 import com.vaadin.flow.dom.Style;
 import com.vaadin.flow.function.SerializableConsumer;
 import org.orienteering.datastandard._3.PersonStart;
@@ -33,11 +36,12 @@ public class RunnerCard extends Card {
     private final LocalDateTime startDateTime;
     private final String password;
     private final DnsService dnsService;
+    private final String registeredBy;
     private boolean started;
 
     public RunnerCard(PersonStart personStart, String className, int bibNumber,
                       String startPlace, LocalTime startTime, LocalDateTime startDateTime,
-                      String password, DnsService dnsService) {
+                      String password, DnsService dnsService, String registeredBy) {
         this.personStart = personStart;
         this.className = className;
         this.bibNumber = bibNumber;
@@ -46,6 +50,7 @@ public class RunnerCard extends Card {
         this.startDateTime = startDateTime;
         this.password = password;
         this.dnsService = dnsService;
+        this.registeredBy = registeredBy;
 
         setTitle(bibNumber + " " + getName());
         setTitleHeadingLevel(3);
@@ -88,7 +93,7 @@ public class RunnerCard extends Card {
         var layout = new VerticalLayout();
         layout.setPadding(true);
         layout.setSpacing(false);
-        layout.setWidth("250px");
+        layout.setWidth("280px");
 
         layout.add(detail("Nimi", getName()));
         layout.add(detail("Seura", getClub()));
@@ -111,11 +116,65 @@ public class RunnerCard extends Card {
                     e.getRegisteredAt() != null ? e.getRegisteredAt().format(DateTimeFormatter.ofPattern("HH:mm:ss")) : "-"));
             layout.add(detail("Kirjaaja",
                     e.getRegisteredBy() != null ? e.getRegisteredBy() : "-"));
+
+            var commentField = new CommentField(e.getComment());
+            commentField.addSaveListener(comment -> {
+                dnsService.updateComment(password, bibNumber, comment);
+                Notification.show("Kommentti tallennettu");
+            });
+            layout.add(commentField);
         } else {
             layout.add(detail("Kirjattu lähteneeksi", "Ei"));
+
+            var commentField = new CommentField(null);
+            var markButton = new Button("Kirjaa lähteneeksi kommentilla...", VaadinIcon.CHECK.create(), e -> {
+                dnsService.markStarted(password, bibNumber, registeredBy, commentField.getValue());
+                setStarted(true);
+                Notification.show("Kirjattu lähteneeksi");
+            });
+            markButton.addThemeVariants(ButtonVariant.PRIMARY, ButtonVariant.SMALL);
+            markButton.setWidthFull();
+            layout.add(commentField, markButton);
         }
 
         return layout;
+    }
+
+    static class CommentField extends VerticalLayout {
+
+        private final TextArea textArea;
+        private SerializableConsumer<String> saveListener;
+
+        CommentField(String initialValue) {
+            setPadding(false);
+            setSpacing(false);
+
+            textArea = new TextArea("Kommentti");
+            textArea.setWidthFull();
+            textArea.setMaxLength(500);
+            textArea.setPlaceholder("Esim. annettu emit 12345 rikkoutuneen tilalle");
+            if (initialValue != null) {
+                textArea.setValue(initialValue);
+            }
+
+            var saveButton = new Button("Tallenna kommentti", e -> {
+                if (saveListener != null) {
+                    saveListener.accept(textArea.getValue());
+                }
+            });
+            saveButton.addThemeVariants(ButtonVariant.SMALL);
+            saveButton.setWidthFull();
+
+            add(textArea, saveButton);
+        }
+
+        String getValue() {
+            return textArea.getValue();
+        }
+
+        void addSaveListener(SerializableConsumer<String> listener) {
+            this.saveListener = listener;
+        }
     }
 
     private static Component detail(String label, String value) {

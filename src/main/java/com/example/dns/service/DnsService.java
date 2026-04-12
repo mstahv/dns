@@ -43,6 +43,10 @@ public class DnsService {
     }
 
     public void markStarted(String password, int bibNumber, String registeredBy) {
+        markStarted(password, bibNumber, registeredBy, null);
+    }
+
+    public void markStarted(String password, int bibNumber, String registeredBy, String comment) {
         getStartedBibs(password).add(bibNumber);
 
         var entry = new DnsEntry();
@@ -50,10 +54,19 @@ public class DnsService {
         entry.setCompetitorNumber(bibNumber);
         entry.setRegisteredAt(LocalDateTime.now());
         entry.setRegisteredBy(registeredBy);
+        entry.setComment(comment);
         repository.save(entry);
 
         getChangeSignal(password).incrementBy(1);
         notifyListeners(new StartedEvent(password, bibNumber, registeredBy, true));
+    }
+
+    public void updateComment(String password, int bibNumber, String comment) {
+        getEntry(password, bibNumber).ifPresent(entry -> {
+            entry.setComment(comment);
+            repository.save(entry);
+            getChangeSignal(password).incrementBy(1);
+        });
     }
 
     public void unmarkStarted(String password, int bibNumber) {

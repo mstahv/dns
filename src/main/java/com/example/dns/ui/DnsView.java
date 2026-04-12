@@ -80,6 +80,7 @@ public class DnsView extends VerticalLayout {
     private boolean showStarted = true;
     private boolean showNotStarted = true;
     private Set<String> selectedStartPlaces = Set.of();
+    private PopoverButton searchButton;
 
     public DnsView(CompetitionRepository competitionRepository,
                    TulospalveluService tulospalveluService, DnsService dnsService,
@@ -201,7 +202,7 @@ public class DnsView extends VerticalLayout {
         });
         updateAutoButton();
 
-        var searchButton = new PopoverButton(this::createSearchPanel) {{
+        searchButton = new PopoverButton(this::createSearchPanel) {{
             setIcon(VaadinIcon.SEARCH.create());
             addThemeVariants(ButtonVariant.TERTIARY);
         }};
@@ -288,7 +289,7 @@ public class DnsView extends VerticalLayout {
         jumpRow.setWidthFull();
         jumpRow.setJustifyContentMode(FlexComponent.JustifyContentMode.BETWEEN);
 
-        var closeButton = new Button("Sulje", e -> timeButton.close());
+        var closeButton = new Button("Käytä", e -> timeButton.close());
         closeButton.addThemeVariants(ButtonVariant.TERTIARY);
         closeButton.setWidthFull();
 
@@ -361,11 +362,8 @@ public class DnsView extends VerticalLayout {
         clearButton.setWidthFull();
 
         // "Sulje" button to close the popover — users expect a close action
-        var closeButton = new Button("Sulje", e -> {
-            // Walk up to find the PopoverButton and close it
-            getParent().ifPresent(p -> p.getParent().ifPresent(pp -> {
-                if (pp instanceof PopoverButton pb) pb.close();
-            }));
+        var closeButton = new Button("Käytä", e -> {
+            searchButton.close();
         });
         closeButton.addThemeVariants(ButtonVariant.PRIMARY);
         closeButton.setWidthFull();
@@ -399,7 +397,7 @@ public class DnsView extends VerticalLayout {
         for (var pending : sorted) {
             var card = new RunnerCard(pending.personStart(), pending.className(),
                     pending.bibNumber(), pending.startPlace(), time,
-                    pending.startDateTime(), password, dnsService);
+                    pending.startDateTime(), password, dnsService, userSession.getName());
             if (startedBibs.contains(pending.bibNumber())) {
                 card.setStarted(true);
             }

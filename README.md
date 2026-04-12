@@ -164,10 +164,10 @@ ws://<host>:<port>/ws/machine-reading
 
 #### 1. Autentikointi
 
-Ensimmäinen viesti yhdistää lukukoneen:
+Ensimmäinen viesti yhdistää lukukoneen. Valinnainen `version`-kenttä kertoo koneen ohjelmistoversion (käytetään OTA-päivitysten hallintaan):
 
 ```json
-→ {"type":"auth","machineId":"emit-reader-1"}
+→ {"type":"auth","machineId":"emit-reader-1","version":"1.2.3"}
 ```
 
 Palvelin vastaa:
@@ -213,7 +213,17 @@ Jos kilpailijaa ei löydy:
 ← [{"bib":123,"startTime":"","name":"","className":"","found":false}]
 ```
 
-#### 4. Virhe (ilman autentikointia)
+#### 4. OTA-päivityspyyntö (palvelin → kone)
+
+Hallintanäkymästä voidaan lähettää päivityspyyntö online-koneelle. Kone voi reagoida tähän lataamalla ja asentamalla päivityksen oman järjestelmänsä mukaisesti (esim. käynnistyä uudelleen). Palvelin ei seuraa päivityksen etenemistä — kone katoaa offline-tilaan ja palaa uudella versiolla.
+
+```json
+← {"type":"requestUpdate"}
+```
+
+Koneen versio näkyy hallintanäkymässä "Tila"-sarakkeessa (esim. "Online (v1.2.3)") jos kone ilmoitti versionsa auth-viestissä.
+
+#### 5. Virhe (ilman autentikointia)
 
 ```json
 ← {"type":"error","error":"Ei autentikoitu. Lähetä ensin: {\"type\":\"auth\",\"machineId\":\"...\"}"}
@@ -223,7 +233,8 @@ Jos kilpailijaa ei löydy:
 
 ```
 Client                              Server
-  |-- {"type":"auth","machineId":"X"} -->|
+  |-- {"type":"auth","machineId":"X",    |
+  |    "version":"1.2.3"} ------------->|
   |<-- {"type":"auth","ok":true} --------|
   |<-- {"type":"startlist","data":{...}} |  ← kone voi nyt näyttää tiedot paikallisesti
   |                                       |
@@ -240,5 +251,10 @@ Client                              Server
   |  (tulospalvelu.fi:n lähtölista        |
   |   päivittyy, esim. emit-muutos)       |
   |<-- {"type":"startlist","data":{...}} |  ← uudet tiedot pushataan automaattisesti
+  |                                       |
+  |  (toimitsija painaa päivitysnappia)   |
+  |<-- {"type":"requestUpdate"} ---------|  ← OTA-päivityspyyntö
+  |  (kone lataa päivityksen, asentaa,   |
+  |   käynnistyy uudelleen...)           |
 ```
 

@@ -199,6 +199,50 @@ class DnsViewTest {
                 "Toisen käyttäjän kortin pitäisi päivittyä signaalin kautta");
     }
 
+    // --- Kommentti ---
+
+    @Test
+    void kirjausKommentillaTallentaaKommentin() {
+        navigateToDns();
+
+        // Kirjataan juoksija lähteneeksi kommentilla (kuten info-popoverin kautta)
+        int bib = dnsService.getStartedBibs(PASSWORD).isEmpty()
+                ? 1 : dnsService.getStartedBibs(PASSWORD).iterator().next();
+        // Käytetään uutta bibiä joka ei ole vielä kirjattu
+        bib = 1;
+        assertFalse(dnsService.isStarted(PASSWORD, bib));
+
+        dnsService.markStarted(PASSWORD, bib, "Testikäyttäjä", "Annettu emit 12345 rikkoutuneen tilalle");
+
+        assertTrue(dnsService.isStarted(PASSWORD, bib));
+        var entry = dnsService.getEntry(PASSWORD, bib);
+        assertTrue(entry.isPresent(), "Kirjauksen pitäisi löytyä");
+        assertEquals("Annettu emit 12345 rikkoutuneen tilalle", entry.get().getComment(),
+                "Kommentti pitäisi tallentua kirjauksen yhteydessä");
+    }
+
+    @Test
+    void kommentinMuokkausJoLahteneelleJuoksijalle() {
+        navigateToDns();
+
+        int bib = 1;
+        dnsService.markStarted(PASSWORD, bib, "Testikäyttäjä");
+        assertTrue(dnsService.isStarted(PASSWORD, bib));
+
+        // Kommentin pitäisi olla tyhjä aluksi
+        var entry = dnsService.getEntry(PASSWORD, bib);
+        assertTrue(entry.isPresent());
+        assertNull(entry.get().getComment(), "Kommentti pitäisi olla aluksi tyhjä");
+
+        // Päivitetään kommentti (kuten info-popoverin Tallenna-nappi tekee)
+        dnsService.updateComment(PASSWORD, bib, "Juoksija tuli takaisin hakemaan karttaa");
+
+        entry = dnsService.getEntry(PASSWORD, bib);
+        assertTrue(entry.isPresent());
+        assertEquals("Juoksija tuli takaisin hakemaan karttaa", entry.get().getComment(),
+                "Kommentin pitäisi päivittyä");
+    }
+
     @Test
     void uusiKayttajaNakeeAiemmanMerkinnan() {
         DnsView view1 = navigateToDns();

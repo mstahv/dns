@@ -31,7 +31,8 @@ import java.util.stream.Collectors;
  * the connection open: authenticate once, then stream readings.
  *
  * Protocol:
- * 1. Client sends auth: {"type":"auth","machineId":"emit-reader-1"}
+ * 1. Client sends auth: {"type":"auth","machineId":"emit-reader-1","version":"1.2.3"}
+ *    (version is optional, for OTA update tracking)
  *    Server responds:    {"type":"auth","ok":true}
  *    Server sends:       {"type":"startlist","data":{"cc_num":{"bib":1,"st":"12:30"},...}}
  *
@@ -40,6 +41,9 @@ import java.util.stream.Collectors;
  *
  * 3. Server may push updated startlist at any time (e.g. machine associated
  *    to new competition, or start list refreshed from tulospalvelu.fi).
+ *
+ * 4. Server may send OTA update request: {"type":"requestUpdate"}
+ *    The machine should handle this by downloading and installing the update.
  */
 @Component
 public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
@@ -53,6 +57,7 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, Machine> sessionMachines = new ConcurrentHashMap<>();
     private final Map<String, WebSocketSession> sessionById = new ConcurrentHashMap<>();
+    private final Map<String, String> sessionVersions = new ConcurrentHashMap<>();
 
     public MachineReadingWebSocketHandler(MachineReadingService machineReadingService,
                                           TulospalveluService tulospalveluService,
@@ -79,6 +84,9 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
             Machine machine = machineReadingService.resolveOrCreateMachine(machineId);
             sessionMachines.put(session.getId(), machine);
             sessionById.put(session.getId(), session);
+            if (node.has("version") && !node.get("version").isNull()) {
+                sessionVersions.put(session.getId(), node.get("version").asText());
+            }
             log.info("WebSocket machine authenticated: {} (session={})", machineId, session.getId());
 
             String authResponse = objectMapper.writeValueAsString(Map.of("type", "auth", "ok", true));
@@ -110,6 +118,7 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
         Machine machine = sessionMachines.remove(session.getId());
         sessionById.remove(session.getId());
+        sessionVersions.remove(session.getId());
         if (machine != null) {
             log.info("WebSocket machine disconnected: {} (session={})", machine.getMachineId(), session.getId());
         }
@@ -177,6 +186,39 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
     public boolean isOnline(Machine machine) {
         return sessionMachines.values().stream()
                 .anyMatch(m -> m.getId().equals(machine.getId()));
+    }
+
+    /**
+     * Returns the version reported by the machine during auth, or null if unknown.
+     */
+    public String getVersion(Machine machine) {
+        for (var entry : sessionMachines.entrySet()) {
+            if (entry.getValue().getId().equals(machine.getId())) {
+                return sessionVersions.get(entry.getKey());
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Sends an OTA update request to the connected machine.
+     */
+    public void requestUpdate(Machine machine) {
+        for (var entry : sessionMachines.entrySet()) {
+            if (entry.getValue().getId().equals(machine.getId())) {
+                WebSocketSession session = sessionById.get(entry.getKey());
+                if (session != null && session.isOpen()) {
+                    try {
+                        String msg = objectMapper.writeValueAsString(Map.of("type", "requestUpdate"));
+                        session.sendMessage(new TextMessage(msg));
+                        log.info("Sent OTA update request to machine {} (session={})",
+                                machine.getMachineId(), session.getId());
+                    } catch (IOException e) {
+                        log.warn("Failed to send update request to machine {}", machine.getMachineId(), e);
+                    }
+                }
+            }
+        }
     }
 
     private void sendStartListData(WebSocketSession session, Machine machine) throws IOException {

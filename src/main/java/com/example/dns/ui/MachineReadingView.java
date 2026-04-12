@@ -12,6 +12,7 @@ import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.combobox.ComboBox;
+import com.vaadin.flow.component.confirmdialog.ConfirmDialog;
 import com.vaadin.flow.component.grid.Grid;
 import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.icon.VaadinIcon;
@@ -89,8 +90,13 @@ public class MachineReadingView extends VerticalLayout {
         machineGrid = new Grid<>(CompetitionMachine.class, false);
         machineGrid.addColumn(cm -> cm.getMachine().getMachineId()).setHeader("Kone-ID");
         machineGrid.addColumn(cm -> cm.getMachine().getMachineName()).setHeader("Nimi");
-        machineGrid.addColumn(cm -> webSocketHandler.isOnline(cm.getMachine()) ? "Online" : "")
-                .setHeader("Tila");
+        machineGrid.addColumn(cm -> {
+            Machine m = cm.getMachine();
+            if (!webSocketHandler.isOnline(m)) return "";
+            String version = webSocketHandler.getVersion(m);
+            return version != null ? "Online (v" + version + ")" : "Online";
+        }).setHeader("Tila");
+        machineGrid.addComponentColumn(this::createUpdateButton).setHeader("");
         machineGrid.addComponentColumn(this::createRenameButton).setHeader("");
         machineGrid.addComponentColumn(this::createApproveToggle).setHeader("Hyväksytty");
         machineGrid.addComponentColumn(this::createRemoveButton).setHeader("");
@@ -142,6 +148,26 @@ public class MachineReadingView extends VerticalLayout {
                 .filter(m -> !associatedMachineIds.contains(m.getId()))
                 .toList();
         combo.setItems(available);
+    }
+
+    private Button createUpdateButton(CompetitionMachine cm) {
+        var button = new Button(VaadinIcon.DOWNLOAD.create(), e -> {
+            String name = cm.getMachine().getMachineName();
+            var dialog = new ConfirmDialog(
+                    "Päivityspyyntö",
+                    "Lähetetäänkö päivityspyyntö koneelle " + name + "?",
+                    "Lähetä",
+                    confirmEvent -> {
+                        webSocketHandler.requestUpdate(cm.getMachine());
+                    }
+            );
+            dialog.setCancelable(true);
+            dialog.setCancelText("Peruuta");
+            dialog.open();
+        });
+        button.addThemeVariants(ButtonVariant.TERTIARY);
+        button.setVisible(webSocketHandler.isOnline(cm.getMachine()));
+        return button;
     }
 
     private Button createRenameButton(CompetitionMachine cm) {

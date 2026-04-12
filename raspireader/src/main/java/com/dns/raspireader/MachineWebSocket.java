@@ -9,6 +9,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -38,6 +39,7 @@ public class MachineWebSocket {
     private final StartlistCache startlistCache;
     private final Consumer<ServerResponse> responseCallback;
     private final Runnable updateCallback;
+    private final Supplier<String> logsCallback;
     private final HttpClient httpClient;
     private final ScheduledExecutorService reconnectScheduler;
 
@@ -53,13 +55,15 @@ public class MachineWebSocket {
     public MachineWebSocket(String wsUrl, String machineId, String version,
                             StartlistCache startlistCache,
                             Consumer<ServerResponse> responseCallback,
-                            Runnable updateCallback) {
+                            Runnable updateCallback,
+                            Supplier<String> logsCallback) {
         this.wsUrl = wsUrl;
         this.machineId = machineId;
         this.version = version;
         this.startlistCache = startlistCache;
         this.responseCallback = responseCallback;
         this.updateCallback = updateCallback;
+        this.logsCallback = logsCallback;
         this.httpClient = HttpClient.newHttpClient();
         this.reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "ws-reconnect");
@@ -238,6 +242,21 @@ public class MachineWebSocket {
             LOG.info("OTA update requested by server");
             if (updateCallback != null) {
                 updateCallback.run();
+            }
+        } else if (message.contains("\"type\":\"requestLogs\"")) {
+            LOG.info("Log request received from server");
+            if (logsCallback != null) {
+                String logContent = logsCallback.get();
+                WebSocket ws = webSocket;
+                if (ws != null && connected) {
+                    String escaped = logContent
+                            .replace("\\", "\\\\")
+                            .replace("\"", "\\\"")
+                            .replace("\n", "\\n")
+                            .replace("\r", "\\r")
+                            .replace("\t", "\\t");
+                    ws.sendText("{\"type\":\"logs\",\"data\":\"" + escaped + "\"}", true);
+                }
             }
         } else if (message.contains("\"type\":\"error\"")) {
             LOG.warning("Server error: " + message);

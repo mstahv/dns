@@ -122,7 +122,8 @@ public class RaspiReader {
                         showFoundLed(ledRef, response.startTime());
                     }
                 },
-                () -> triggerOtaUpdate());
+                () -> triggerOtaUpdate(),
+                RaspiReader::collectLogs);
 
         ws.connect();
 
@@ -350,6 +351,35 @@ public class RaspiReader {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private static String collectLogs() {
+        var sb = new StringBuilder();
+        try {
+            var process = new ProcessBuilder(
+                    "journalctl", "-u", "raspireader", "-n", "200", "--no-pager")
+                    .redirectErrorStream(true)
+                    .start();
+            sb.append(new String(process.getInputStream().readAllBytes()));
+            process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (Exception e) {
+            sb.append("journalctl error: ").append(e.getMessage()).append("\n");
+        }
+        try {
+            var readLog = Path.of("/var/log/raspireader/reads.log");
+            if (java.nio.file.Files.exists(readLog)) {
+                var lines = java.nio.file.Files.readAllLines(readLog);
+                int start = Math.max(0, lines.size() - 50);
+                sb.append("\n--- reads.log (last 50 lines) ---\n");
+                for (int i = start; i < lines.size(); i++) {
+                    sb.append(lines.get(i)).append("\n");
+                }
+            }
+        } catch (Exception e) {
+            sb.append("reads.log error: ").append(e.getMessage()).append("\n");
+        }
+        String result = sb.toString();
+        return result.length() > 64_000 ? result.substring(result.length() - 64_000) : result;
     }
 
     private static void triggerOtaUpdate() {

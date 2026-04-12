@@ -13,9 +13,11 @@ import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
 import com.vaadin.flow.component.combobox.ComboBox;
+import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.grid.Grid;
 import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.H2;
+import com.vaadin.flow.component.html.Pre;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
@@ -93,7 +95,7 @@ public class MachineReadingView extends VerticalLayout {
         machineGrid.addColumn(cm -> cm.getMachine().getMachineId()).setHeader("Kone-ID");
         machineGrid.addColumn(cm -> cm.getMachine().getMachineName()).setHeader("Nimi");
         machineGrid.addComponentColumn(cm -> createStatusCell(cm.getMachine())).setHeader("Tila");
-        machineGrid.addComponentColumn(cm -> new UpdateButton(cm.getMachine())).setHeader("");
+        machineGrid.addComponentColumn(cm -> new ServerActions(cm.getMachine())).setHeader("Toiminnot");
         machineGrid.addComponentColumn(cm -> new RenameButton(cm.getMachine())).setHeader("");
         machineGrid.addComponentColumn(cm -> new ApproveToggle(cm)).setHeader("Hyväksytty");
         machineGrid.addComponentColumn(cm -> new RemoveButton(cm)).setHeader("");
@@ -135,6 +137,15 @@ public class MachineReadingView extends VerticalLayout {
         return link;
     }
 
+    private class ServerActions extends HorizontalLayout {
+        ServerActions(Machine machine) {
+            setSpacing(false);
+            if (webSocketHandler.isOnline(machine)) {
+                add(new UpdateButton(machine), new LogButton(machine));
+            }
+        }
+    }
+
     private class UpdateButton extends ConfirmButton {
         UpdateButton(Machine machine) {
             super(VaadinIcon.DOWNLOAD.create(), () -> webSocketHandler.requestUpdate(machine));
@@ -144,8 +155,42 @@ public class MachineReadingView extends VerticalLayout {
             setCancelText("Peruuta");
             addThemeVariants(ButtonVariant.TERTIARY);
             setTooltipText("Lähetä OTA-päivityspyyntö");
-            setVisible(webSocketHandler.isOnline(machine));
         }
+    }
+
+    private class LogButton extends VButton {
+        LogButton(Machine machine) {
+            setIcon(VaadinIcon.FILE_TEXT_O.create());
+            addThemeVariants(ButtonVariant.TERTIARY);
+            setTooltipText("Näytä koneen lokit");
+            addClickListener(e -> {
+                setEnabled(false);
+                webSocketHandler.requestLogs(machine).thenAccept(logContent ->
+                    getUI().ifPresent(ui -> ui.access(() -> {
+                        setEnabled(true);
+                        showLogDialog(machine, logContent);
+                    }))
+                );
+            });
+        }
+    }
+
+    private void showLogDialog(Machine machine, String logContent) {
+        var dialog = new Dialog();
+        dialog.setHeaderTitle("Lokit: " + machine.getMachineName());
+        dialog.setWidth("80vw");
+        dialog.setHeight("70vh");
+
+        var pre = new Pre(logContent);
+        pre.getStyle()
+                .setOverflow(com.vaadin.flow.dom.Style.Overflow.AUTO)
+                .setFontSize("var(--lumo-font-size-s)");
+        pre.setWidthFull();
+        pre.setHeight("100%");
+
+        dialog.add(pre);
+        dialog.getFooter().add(new Button("Sulje", ev -> dialog.close()));
+        dialog.open();
     }
 
     private class RenameButton extends VButton {{

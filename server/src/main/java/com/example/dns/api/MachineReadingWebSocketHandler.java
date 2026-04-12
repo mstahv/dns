@@ -23,7 +23,9 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -44,6 +46,9 @@ import java.util.stream.Collectors;
  *
  * 4. Server may send OTA update request: {"type":"requestUpdate"}
  *    The machine should handle this by downloading and installing the update.
+ *
+ * 5. Server may request logs: {"type":"requestLogs"}
+ *    Machine responds:        {"type":"logs","data":"...log content..."}
  */
 @Component
 public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
@@ -58,6 +63,7 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, Machine> sessionMachines = new ConcurrentHashMap<>();
     private final Map<String, WebSocketSession> sessionById = new ConcurrentHashMap<>();
     private final Map<String, String> sessionVersions = new ConcurrentHashMap<>();
+    private final Map<Long, CompletableFuture<String>> pendingLogRequests = new ConcurrentHashMap<>();
 
     public MachineReadingWebSocketHandler(MachineReadingService machineReadingService,
                                           TulospalveluService tulospalveluService,
@@ -96,6 +102,19 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        // Logs response from machine
+        if (node.has("type") && "logs".equals(node.get("type").asText())) {
+            Machine m = sessionMachines.get(session.getId());
+            if (m != null) {
+                String logData = node.has("data") ? node.get("data").asText() : "(tyhjä)";
+                CompletableFuture<String> pending = pendingLogRequests.remove(m.getId());
+                if (pending != null) {
+                    pending.complete(logData);
+                }
+            }
+            return;
+        }
+
         // Reading message — must be authenticated
         Machine machine = sessionMachines.get(session.getId());
         if (machine == null) {
@@ -120,6 +139,10 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
         sessionById.remove(session.getId());
         sessionVersions.remove(session.getId());
         if (machine != null) {
+            CompletableFuture<String> pending = pendingLogRequests.remove(machine.getId());
+            if (pending != null) {
+                pending.complete("(Yhteys katkesi)");
+            }
             log.info("WebSocket machine disconnected: {} (session={})", machine.getMachineId(), session.getId());
         }
     }
@@ -198,6 +221,34 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
             }
         }
         return null;
+    }
+
+    /**
+     * Requests logs from the connected machine. Returns a future that completes
+     * when the machine responds or times out after 15 seconds.
+     */
+    public CompletableFuture<String> requestLogs(Machine machine) {
+        CompletableFuture<String> future = new CompletableFuture<>();
+        future.completeOnTimeout("(Aikakatkaisu: konetta ei tavoitettu)", 15, TimeUnit.SECONDS);
+        pendingLogRequests.put(machine.getId(), future);
+
+        for (var entry : sessionMachines.entrySet()) {
+            if (entry.getValue().getId().equals(machine.getId())) {
+                WebSocketSession session = sessionById.get(entry.getKey());
+                if (session != null && session.isOpen()) {
+                    try {
+                        String msg = objectMapper.writeValueAsString(Map.of("type", "requestLogs"));
+                        session.sendMessage(new TextMessage(msg));
+                        log.info("Sent log request to machine {} (session={})",
+                                machine.getMachineId(), session.getId());
+                    } catch (IOException e) {
+                        log.warn("Failed to send log request to machine {}", machine.getMachineId(), e);
+                        future.complete("(Virhe: " + e.getMessage() + ")");
+                    }
+                }
+            }
+        }
+        return future;
     }
 
     /**

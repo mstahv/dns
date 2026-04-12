@@ -48,8 +48,10 @@ public class RaspiReader {
             }
         }
 
+        String version = getVersion();
         LOG.info("DNS RaspiReader starting...");
         if (emitCheck) LOG.info("  Mode: EMITCHECK (read-only, no start registration)");
+        LOG.info("  Version: " + (version != null ? version : "unknown"));
         LOG.info("  Server URL: " + baseUrl);
         LOG.info("  Machine ID: " + machineId);
         LOG.info("  Log file: " + logPath);
@@ -95,7 +97,7 @@ public class RaspiReader {
         String wsUrl = baseUrl.replaceFirst("^http", "ws") + "/ws/machine-reading";
 
         // Server response callback — may override LED if it disagrees with cache
-        MachineWebSocket ws = new MachineWebSocket(wsUrl, machineId, startlistCache,
+        MachineWebSocket ws = new MachineWebSocket(wsUrl, machineId, version, startlistCache,
                 response -> {
                     int displayedCard = lastDisplayedCard;
                     if (displayedCard < 0 || ledRef == null) return;
@@ -119,7 +121,8 @@ public class RaspiReader {
                     if (response.found() && cacheFoundIt && response.startTime() != null) {
                         showFoundLed(ledRef, response.startTime());
                     }
-                });
+                },
+                () -> triggerOtaUpdate());
 
         ws.connect();
 
@@ -309,6 +312,39 @@ public class RaspiReader {
                 // ignore
             }
             return hostname;
+        }
+    }
+
+    private static String getVersion() {
+        // Read git commit hash from the repo clone
+        try {
+            var process = new ProcessBuilder("git", "rev-parse", "--short", "HEAD")
+                    .directory(new java.io.File("/opt/raspireader/repo"))
+                    .redirectErrorStream(true)
+                    .start();
+            String output = new String(process.getInputStream().readAllBytes()).trim();
+            int exitCode = process.waitFor();
+            if (exitCode == 0 && !output.isEmpty()) {
+                return output;
+            }
+        } catch (Exception e) {
+            // Repo not cloned yet or git not available
+        }
+        return null;
+    }
+
+    private static void triggerOtaUpdate() {
+        LOG.info("Triggering OTA update via update.sh...");
+        try {
+            // Run update script detached — it will stop this service, so we won't see the result
+            new ProcessBuilder("sudo", "/opt/raspireader/repo/raspireader/update.sh")
+                    .redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.appendTo(
+                            new java.io.File("/var/log/raspireader/update.log")))
+                    .start();
+            LOG.info("Update script launched, service will restart soon");
+        } catch (Exception e) {
+            LOG.severe("Failed to launch update script: " + e.getMessage());
         }
     }
 

@@ -34,8 +34,10 @@ public class MachineWebSocket {
 
     private final String wsUrl;
     private final String machineId;
+    private final String version;
     private final StartlistCache startlistCache;
     private final Consumer<ServerResponse> responseCallback;
+    private final Runnable updateCallback;
     private final HttpClient httpClient;
     private final ScheduledExecutorService reconnectScheduler;
 
@@ -48,13 +50,16 @@ public class MachineWebSocket {
     private int reconnectDelaySec = 1;
     private java.util.concurrent.ScheduledFuture<?> pingTask;
 
-    public MachineWebSocket(String wsUrl, String machineId,
+    public MachineWebSocket(String wsUrl, String machineId, String version,
                             StartlistCache startlistCache,
-                            Consumer<ServerResponse> responseCallback) {
+                            Consumer<ServerResponse> responseCallback,
+                            Runnable updateCallback) {
         this.wsUrl = wsUrl;
         this.machineId = machineId;
+        this.version = version;
         this.startlistCache = startlistCache;
         this.responseCallback = responseCallback;
+        this.updateCallback = updateCallback;
         this.httpClient = HttpClient.newHttpClient();
         this.reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "ws-reconnect");
@@ -73,7 +78,8 @@ public class MachineWebSocket {
                         connected = true;
                         lastPongTime = System.currentTimeMillis();
                         reconnectDelaySec = 1;
-                        String authMsg = "{\"type\":\"auth\",\"machineId\":\"" + machineId + "\"}";
+                        String versionField = version != null ? ",\"version\":\"" + version + "\"" : "";
+                        String authMsg = "{\"type\":\"auth\",\"machineId\":\"" + machineId + "\"" + versionField + "}";
                         LOG.info("WS connected, sending: " + truncate(authMsg));
                         ws.sendText(authMsg, true);
                         startPingLoop();
@@ -228,6 +234,11 @@ public class MachineWebSocket {
             }
         } else if (message.startsWith("[")) {
             parseReadingResponse(message);
+        } else if (message.contains("\"type\":\"requestUpdate\"")) {
+            LOG.info("OTA update requested by server");
+            if (updateCallback != null) {
+                updateCallback.run();
+            }
         } else if (message.contains("\"type\":\"error\"")) {
             LOG.warning("Server error: " + message);
         } else {

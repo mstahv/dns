@@ -246,17 +246,25 @@ public class MachineWebSocket {
         } else if (message.contains("\"type\":\"requestLogs\"")) {
             LOG.info("Log request received from server");
             if (logsCallback != null) {
-                String logContent = logsCallback.get();
-                WebSocket ws = webSocket;
-                if (ws != null && connected) {
-                    String escaped = logContent
-                            .replace("\\", "\\\\")
-                            .replace("\"", "\\\"")
-                            .replace("\n", "\\n")
-                            .replace("\r", "\\r")
-                            .replace("\t", "\\t");
-                    ws.sendText("{\"type\":\"logs\",\"data\":\"" + escaped + "\"}", true);
-                }
+                // Run in separate thread to avoid blocking WebSocket listener
+                // (journalctl can be slow on Pi Zero, blocking would kill ping/pong)
+                Thread.ofVirtual().name("log-collector").start(() -> {
+                    try {
+                        String logContent = logsCallback.get();
+                        WebSocket ws = webSocket;
+                        if (ws != null && connected) {
+                            String escaped = logContent
+                                    .replace("\\", "\\\\")
+                                    .replace("\"", "\\\"")
+                                    .replace("\n", "\\n")
+                                    .replace("\r", "\\r")
+                                    .replace("\t", "\\t");
+                            ws.sendText("{\"type\":\"logs\",\"data\":\"" + escaped + "\"}", true);
+                        }
+                    } catch (Exception e) {
+                        LOG.warning("Failed to collect/send logs: " + e.getMessage());
+                    }
+                });
             }
         } else if (message.contains("\"type\":\"error\"")) {
             LOG.warning("Server error: " + message);

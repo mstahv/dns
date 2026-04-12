@@ -48,6 +48,17 @@ After each card read, LEDs indicate the result:
 | Kortti tuntematon (`found:false`) | Palaa jatkuvana | Vilkkuu | Korttia ei löydy järjestelmästä |
 | Serverivirhe / ei vastausta | Pois | Vilkkuu | Yhteysongelma tai muu virhe |
 
+### Idle-tila (ei kortinlukuja 20 s)
+
+Kun kortteja ei ole luettu 20 sekuntiin, laite näyttää yhteystilan tuplavälähdyksellä 5 sekunnin välein:
+
+| Tilanne | LED | Merkitys |
+|---------|-----|----------|
+| Yhteys palvelimeen OK | Vihreä tuplavälähdys | Laite valmiina, yhteys kunnossa |
+| Ei yhteyttä palvelimeen | Punainen tuplavälähdys | Laite valmiina, yhteys poikki |
+
+Tuplavälähdys on kaksi nopeaa välähdystä (80 ms päälle, 120 ms tauko, 80 ms päälle). Välähdys lakkaa heti kun kortti luetaan.
+
 ### Onboard ACT LED (yhteystila)
 
 Raspberry Pi:n levyllä oleva ACT LED indikoi yhteystilaa:

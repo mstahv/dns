@@ -30,12 +30,60 @@ public class LedController {
         return t;
     });
 
+    private static final long IDLE_TIMEOUT_MS = 20_000;
+    private static final long IDLE_HEARTBEAT_INTERVAL_MS = 5_000;
+    private static final long DOUBLE_FLASH_MS = 80;
+    private static final long DOUBLE_FLASH_GAP_MS = 120;
+
     private ScheduledFuture<?> blinkTask;
     private ScheduledFuture<?> stopTask;
+    private ScheduledFuture<?> idleTask;
+    private volatile long lastActivityTime;
+    private volatile java.util.function.BooleanSupplier connectedCheck;
 
     public LedController(Context pi4j) {
         this.greenLed = pi4j.digitalOutput().create(GREEN_GPIO_PIN);
         this.redLed = pi4j.digitalOutput().create(RED_GPIO_PIN);
+    }
+
+    /**
+     * Start idle heartbeat: double-flash green every 5s when no card
+     * has been read for 20s and server connection is up.
+     */
+    public void startIdleHeartbeat(java.util.function.BooleanSupplier connected) {
+        this.connectedCheck = connected;
+        this.lastActivityTime = System.currentTimeMillis();
+        idleTask = scheduler.scheduleAtFixedRate(() -> {
+            if (blinkTask == null
+                    && System.currentTimeMillis() - lastActivityTime > IDLE_TIMEOUT_MS) {
+                if (connectedCheck.getAsBoolean()) {
+                    doubleFlash(greenLed);
+                } else {
+                    doubleFlash(redLed);
+                }
+            }
+        }, IDLE_HEARTBEAT_INTERVAL_MS, IDLE_HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /** Record card activity — resets idle timer */
+    public void recordActivity() {
+        lastActivityTime = System.currentTimeMillis();
+    }
+
+    private void doubleFlash(DigitalOutput led) {
+        scheduler.execute(() -> {
+            try {
+                led.high();
+                Thread.sleep(DOUBLE_FLASH_MS);
+                led.low();
+                Thread.sleep(DOUBLE_FLASH_GAP_MS);
+                led.high();
+                Thread.sleep(DOUBLE_FLASH_MS);
+                led.low();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
     }
 
     /** 0–4 min to start: green blinks normally — staff guides runner to correct start */
@@ -121,6 +169,10 @@ public class LedController {
     }
 
     public void shutdown() {
+        if (idleTask != null) {
+            idleTask.cancel(false);
+            idleTask = null;
+        }
         stopBlinking();
         scheduler.shutdownNow();
     }

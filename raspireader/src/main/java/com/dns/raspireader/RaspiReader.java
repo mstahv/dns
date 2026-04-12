@@ -131,6 +131,11 @@ public class RaspiReader {
             onboardLed.startStatusIndicator(ws::isConnected);
         }
 
+        // Start idle heartbeat on external LEDs
+        if (led != null) {
+            led.startIdleHeartbeat(ws::isConnected);
+        }
+
         // Configure and open serial port
         port.setComPortParameters(BAUD_RATE, DATA_BITS, STOP_BITS, PARITY);
         port.setComPortTimeouts(SerialPort.TIMEOUT_READ_SEMI_BLOCKING, 1000, 0);
@@ -191,6 +196,7 @@ public class RaspiReader {
 
                     LOG.info("Card read: " + cardNumber);
                     readLogger.logRead(cardNumber);
+                    if (ledRef != null) ledRef.recordActivity();
 
                     if (emitCheckMode) {
                         // Emitcheck: read-only, just check if card is in startlist
@@ -316,21 +322,34 @@ public class RaspiReader {
     }
 
     private static String getVersion() {
-        // Read git commit hash from the repo clone
+        // Read git commit hash and date from the repo clone
+        // Format: "abc1234 2026-04-12 18:30"
+        var repoDir = new java.io.File("/opt/raspireader/repo");
         try {
-            var process = new ProcessBuilder("git", "rev-parse", "--short", "HEAD")
-                    .directory(new java.io.File("/opt/raspireader/repo"))
+            String hash = runGit(repoDir, "git", "rev-parse", "--short", "HEAD");
+            if (hash == null) return null;
+            String date = runGit(repoDir, "git", "log", "-1", "--format=%ci");
+            if (date != null && date.length() >= 16) {
+                // "%ci" gives "2026-04-12 18:30:00 +0300", take date+time
+                date = date.substring(0, 16);
+            }
+            return date != null ? hash + " " + date : hash;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static String runGit(java.io.File dir, String... command) {
+        try {
+            var process = new ProcessBuilder(command)
+                    .directory(dir)
                     .redirectErrorStream(true)
                     .start();
             String output = new String(process.getInputStream().readAllBytes()).trim();
-            int exitCode = process.waitFor();
-            if (exitCode == 0 && !output.isEmpty()) {
-                return output;
-            }
+            return process.waitFor() == 0 && !output.isEmpty() ? output : null;
         } catch (Exception e) {
-            // Repo not cloned yet or git not available
+            return null;
         }
-        return null;
     }
 
     private static void triggerOtaUpdate() {

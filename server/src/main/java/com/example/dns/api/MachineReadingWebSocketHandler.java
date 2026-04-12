@@ -105,10 +105,13 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
         // Logs response from machine
         if (node.has("type") && "logs".equals(node.get("type").asText())) {
             Machine m = sessionMachines.get(session.getId());
+            log.info("Received logs response from machine {} ({} chars)",
+                    m != null ? m.getMachineId() : "unknown", message.getPayload().length());
             if (m != null) {
                 String logData = node.has("data") ? node.get("data").asText() : "(tyhjä)";
                 CompletableFuture<String> pending = pendingLogRequests.remove(m.getId());
                 if (pending != null) {
+                    log.info("Completing pending log request for machine {}", m.getMachineId());
                     pending.complete(logData);
                 }
             }

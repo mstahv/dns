@@ -358,11 +358,16 @@ public class RaspiReader {
         var sb = new StringBuilder();
         try {
             var process = new ProcessBuilder(
-                    "journalctl", "-u", "raspireader", "-n", "100", "--no-pager")
+                    "journalctl", "-u", "raspireader", "-n", "50", "--no-pager", "--plain")
                     .redirectErrorStream(true)
                     .start();
+            // Read with timeout — don't let journalctl hang
+            boolean finished = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
             sb.append(new String(process.getInputStream().readAllBytes()));
-            process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+            if (!finished) {
+                process.destroyForcibly();
+                sb.append("\n(journalctl timeout)\n");
+            }
         } catch (Exception e) {
             sb.append("journalctl error: ").append(e.getMessage()).append("\n");
         }
@@ -370,8 +375,8 @@ public class RaspiReader {
             var readLog = Path.of("/var/log/raspireader/reads.log");
             if (java.nio.file.Files.exists(readLog)) {
                 var lines = java.nio.file.Files.readAllLines(readLog);
-                int start = Math.max(0, lines.size() - 50);
-                sb.append("\n--- reads.log (last 50 lines) ---\n");
+                int start = Math.max(0, lines.size() - 30);
+                sb.append("\n--- reads.log (last ").append(lines.size() - start).append(" lines) ---\n");
                 for (int i = start; i < lines.size(); i++) {
                     sb.append(lines.get(i)).append("\n");
                 }
@@ -380,7 +385,11 @@ public class RaspiReader {
             sb.append("reads.log error: ").append(e.getMessage()).append("\n");
         }
         String result = sb.toString();
-        return result.length() > 32_000 ? result.substring(result.length() - 32_000) : result;
+        if (result.length() > 16_000) {
+            result = result.substring(result.length() - 16_000);
+        }
+        LOG.info("Collected logs: " + result.length() + " chars");
+        return result;
     }
 
     private static void triggerShutdown() {

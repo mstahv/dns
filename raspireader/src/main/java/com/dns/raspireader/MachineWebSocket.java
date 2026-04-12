@@ -259,9 +259,19 @@ public class MachineWebSocket {
                 Thread.ofVirtual().name("log-collector").start(() -> {
                     try {
                         String logContent = logsCallback.get();
+                        String escaped = escapeJson(logContent);
+                        String msg = "{\"type\":\"logs\",\"data\":\"" + escaped + "\"}";
+                        LOG.info("Sending logs response: " + msg.length() + " chars");
                         WebSocket ws = webSocket;
                         if (ws != null && connected) {
-                            ws.sendText("{\"type\":\"logs\",\"data\":\"" + escapeJson(logContent) + "\"}", true);
+                            ws.sendText(msg, true)
+                                    .thenRun(() -> LOG.info("Logs response sent successfully"))
+                                    .exceptionally(e2 -> {
+                                        LOG.warning("Logs send failed: " + e2.getMessage());
+                                        return null;
+                                    });
+                        } else {
+                            LOG.warning("Cannot send logs: ws=" + (ws != null) + " connected=" + connected);
                         }
                     } catch (Exception e) {
                         LOG.warning("Failed to collect/send logs: " + e.getMessage());

@@ -17,6 +17,19 @@ sudo nano /etc/systemd/system/raspireader.service   # aseta kilpailun URL tarvit
 sudo systemctl enable --now raspireader
 ```
 
+## OTA-päivitykset
+
+Laite tukee etäpäivityksiä serverin hallintanäkymästä. Päivitysnappi näkyy online-koneille "Toiminnot"-sarakkeessa.
+
+Päivitys:
+1. Serveri lähettää `{"type":"requestUpdate"}` WebSocketin kautta
+2. Laite käynnistää `update.sh`:n itsenäisenä systemd-yksikkönä (`raspireader-update.service`)
+3. Skripti pysäyttää lukijapalvelun, hakee uusimman koodin gitistä, buildaa ja käynnistää uudelleen
+
+Manuaalinen päivitys: `sudo /opt/raspireader/repo/raspireader/update.sh`
+
+Päivityslokit: `sudo journalctl -u raspireader-update`
+
 ## Requirements
 
 - Raspberry Pi Zero 2 W (or any Pi with GPIO and USB)

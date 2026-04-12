@@ -385,18 +385,20 @@ public class RaspiReader {
     private static void triggerOtaUpdate() {
         LOG.info("Triggering OTA update via update.sh...");
         try {
-            // Use systemd-run to escape this service's cgroup — otherwise
-            // systemctl stop raspireader kills update.sh too
+            // Create a fully independent transient service unit via systemd-run.
+            // Without --scope, systemd-run returns immediately after starting
+            // the transient unit, so the update script survives even when
+            // systemctl stop raspireader kills this process.
             new ProcessBuilder(
-                    "sudo", "systemd-run", "--scope",
-                    "/opt/raspireader/repo/raspireader/update.sh")
-                    .redirectErrorStream(true)
-                    .redirectOutput(ProcessBuilder.Redirect.appendTo(
-                            new java.io.File("/var/log/raspireader/update.log")))
+                    "systemd-run",
+                    "--unit=raspireader-update",
+                    "--description=RaspiReader OTA Update",
+                    "/bin/bash", "/opt/raspireader/repo/raspireader/update.sh")
+                    .inheritIO()
                     .start();
-            LOG.info("Update script launched in separate scope, service will restart soon");
+            LOG.info("Update transient unit started, service will restart soon");
         } catch (Exception e) {
-            LOG.severe("Failed to launch update script: " + e.getMessage());
+            LOG.severe("Failed to launch update: " + e.getMessage());
         }
     }
 

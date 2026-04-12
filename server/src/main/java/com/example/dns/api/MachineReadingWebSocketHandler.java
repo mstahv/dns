@@ -252,6 +252,27 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
+     * Sends a shutdown request to the connected machine.
+     */
+    public void requestShutdown(Machine machine) {
+        for (var entry : sessionMachines.entrySet()) {
+            if (entry.getValue().getId().equals(machine.getId())) {
+                WebSocketSession session = sessionById.get(entry.getKey());
+                if (session != null && session.isOpen()) {
+                    try {
+                        String msg = objectMapper.writeValueAsString(Map.of("type", "requestShutdown"));
+                        session.sendMessage(new TextMessage(msg));
+                        log.info("Sent shutdown request to machine {} (session={})",
+                                machine.getMachineId(), session.getId());
+                    } catch (IOException e) {
+                        log.warn("Failed to send shutdown request to machine {}", machine.getMachineId(), e);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Sends an OTA update request to the connected machine.
      */
     public void requestUpdate(Machine machine) {

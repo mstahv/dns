@@ -39,6 +39,7 @@ public class MachineWebSocket {
     private final StartlistCache startlistCache;
     private final Consumer<ServerResponse> responseCallback;
     private final Runnable updateCallback;
+    private final Runnable shutdownCallback;
     private final Supplier<String> logsCallback;
     private final HttpClient httpClient;
     private final ScheduledExecutorService reconnectScheduler;
@@ -56,6 +57,7 @@ public class MachineWebSocket {
                             StartlistCache startlistCache,
                             Consumer<ServerResponse> responseCallback,
                             Runnable updateCallback,
+                            Runnable shutdownCallback,
                             Supplier<String> logsCallback) {
         this.wsUrl = wsUrl;
         this.machineId = machineId;
@@ -63,6 +65,7 @@ public class MachineWebSocket {
         this.startlistCache = startlistCache;
         this.responseCallback = responseCallback;
         this.updateCallback = updateCallback;
+        this.shutdownCallback = shutdownCallback;
         this.logsCallback = logsCallback;
         this.httpClient = HttpClient.newHttpClient();
         this.reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -242,6 +245,11 @@ public class MachineWebSocket {
             LOG.info("OTA update requested by server");
             if (updateCallback != null) {
                 updateCallback.run();
+            }
+        } else if (message.contains("\"type\":\"requestShutdown\"")) {
+            LOG.info("Shutdown requested by server");
+            if (shutdownCallback != null) {
+                shutdownCallback.run();
             }
         } else if (message.contains("\"type\":\"requestLogs\"")) {
             LOG.info("Log request received from server");

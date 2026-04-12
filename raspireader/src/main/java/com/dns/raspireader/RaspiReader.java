@@ -123,6 +123,7 @@ public class RaspiReader {
                     }
                 },
                 () -> triggerOtaUpdate(),
+                RaspiReader::triggerShutdown,
                 RaspiReader::collectLogs);
 
         ws.connect();
@@ -380,6 +381,15 @@ public class RaspiReader {
         }
         String result = sb.toString();
         return result.length() > 64_000 ? result.substring(result.length() - 64_000) : result;
+    }
+
+    private static void triggerShutdown() {
+        LOG.info("Shutdown requested, executing shutdown -h now...");
+        try {
+            new ProcessBuilder("shutdown", "-h", "now").start();
+        } catch (Exception e) {
+            LOG.severe("Failed to shutdown: " + e.getMessage());
+        }
     }
 
     private static void triggerOtaUpdate() {

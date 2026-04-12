@@ -95,8 +95,7 @@ public class MachineReadingView extends VerticalLayout {
         machineGrid.addColumn(cm -> cm.getMachine().getMachineId()).setHeader("Kone-ID");
         machineGrid.addColumn(cm -> cm.getMachine().getMachineName()).setHeader("Nimi");
         machineGrid.addComponentColumn(cm -> createStatusCell(cm.getMachine())).setHeader("Tila");
-        machineGrid.addComponentColumn(cm -> new ServerActions(cm.getMachine())).setHeader("Toiminnot");
-        machineGrid.addComponentColumn(cm -> new RenameButton(cm.getMachine())).setHeader("");
+        machineGrid.addComponentColumn(cm -> new ServerActions(cm)).setHeader("Toiminnot");
         machineGrid.addComponentColumn(cm -> new ApproveToggle(cm)).setHeader("Hyväksytty");
         machineGrid.addComponentColumn(cm -> new RemoveButton(cm)).setHeader("");
         machineGrid.setWidthFull();
@@ -137,10 +136,12 @@ public class MachineReadingView extends VerticalLayout {
     }
 
     private class ServerActions extends HorizontalLayout {
-        ServerActions(Machine machine) {
+        ServerActions(CompetitionMachine cm) {
             setSpacing(false);
+            Machine machine = cm.getMachine();
+            add(new RenameButton(machine));
             if (webSocketHandler.isOnline(machine)) {
-                add(new UpdateButton(machine), new LogButton(machine));
+                add(new UpdateButton(machine), new LogButton(machine), new ShutdownButton(machine));
             }
         }
     }
@@ -154,6 +155,18 @@ public class MachineReadingView extends VerticalLayout {
             setCancelText("Peruuta");
             addThemeVariants(ButtonVariant.TERTIARY);
             setTooltipText("Lähetä OTA-päivityspyyntö");
+        }
+    }
+
+    private class ShutdownButton extends ConfirmButton {
+        ShutdownButton(Machine machine) {
+            super(VaadinIcon.POWER_OFF.create(), () -> webSocketHandler.requestShutdown(machine));
+            setConfirmationPrompt("Sammuta laite?");
+            setConfirmationDescription("Sammutetaanko " + machine.getMachineName() + "? Laite täytyy käynnistää uudelleen fyysisesti.");
+            setOkText("Sammuta");
+            setCancelText("Peruuta");
+            addThemeVariants(ButtonVariant.TERTIARY, ButtonVariant.ERROR);
+            setTooltipText("Sammuta laite");
         }
     }
 

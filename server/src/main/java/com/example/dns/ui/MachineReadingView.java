@@ -168,29 +168,30 @@ public class MachineReadingView extends VerticalLayout {
                 webSocketHandler.requestLogs(machine).thenAccept(logContent ->
                     getUI().ifPresent(ui -> ui.access(() -> {
                         setEnabled(true);
-                        showLogDialog(machine, logContent);
+                        new LogDialog(machine, logContent).open();
                     }))
                 );
             });
         }
     }
 
-    private void showLogDialog(Machine machine, String logContent) {
-        var dialog = new Dialog();
-        dialog.setHeaderTitle("Lokit: " + machine.getMachineName());
-        dialog.setWidth("80vw");
-        dialog.setHeight("70vh");
+    private static class LogDialog extends Dialog {
+        LogDialog(Machine machine, String logContent) {
+            setHeaderTitle("Lokit: " + machine.getMachineName());
+            setWidth("80vw");
+            setHeight("70vh");
 
-        var pre = new Pre(logContent);
-        pre.getStyle()
-                .setOverflow(com.vaadin.flow.dom.Style.Overflow.AUTO)
-                .setFontSize("var(--lumo-font-size-s)");
-        pre.setWidthFull();
-        pre.setHeight("100%");
+            var pre = new Pre(logContent) {{
+                getStyle()
+                        .setOverflow(com.vaadin.flow.dom.Style.Overflow.AUTO)
+                        .setFontSize("var(--lumo-font-size-s)");
+                setWidthFull();
+                setHeight("100%");
+            }};
 
-        dialog.add(pre);
-        dialog.getFooter().add(new Button("Sulje", ev -> dialog.close()));
-        dialog.open();
+            add(pre);
+            getFooter().add(new Button("Sulje", ev -> close()));
+        }
     }
 
     private class RenameButton extends VButton {{

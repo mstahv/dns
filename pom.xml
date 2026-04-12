@@ -13,5 +13,6 @@
 
     <modules>
         <module>server</module>
+        <module>raspireader</module>
     </modules>
 </project>

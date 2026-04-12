@@ -7,15 +7,10 @@ Emit 250 USB card reader application for Raspberry Pi Zero 2 W. Reads Emit e-car
 Puhtaalle Raspberry Pi:lle (Raspberry Pi OS Lite, wifi konfiguroitu):
 
 ```bash
-curl -sL https://raw.githubusercontent.com/mstahv/dns/main/raspireader/install.sh | sudo bash
+wget -qO- https://raw.githubusercontent.com/mstahv/dns/main/raspireader/install.sh | sudo bash
 ```
 
-Asentaa automaattisesti Java 25:n, Mavenin ja gitin, kloonaa repon, buildaa ja asentaa systemd-servicen. Asennuksen jälkeen konfiguroi ja käynnistä:
-
-```bash
-sudo nano /etc/systemd/system/raspireader.service   # aseta kilpailun URL tarvittaessa
-sudo systemctl enable --now raspireader
-```
+Asentaa automaattisesti Java 25:n, Mavenin ja gitin, kloonaa repon, buildaa ja asentaa systemd-palvelut (lukija + OTA-päivitys). Laite käynnistyy uudelleen asennuksen lopuksi ja lukija käynnistyy automaattisesti.
 
 ## OTA-päivitykset
 

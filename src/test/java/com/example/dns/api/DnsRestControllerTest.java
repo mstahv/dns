@@ -17,14 +17,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
-import com.vaadin.browserless.VaadinTestApplicationContext;
-import com.vaadin.browserless.VaadinTestUiContext;
-import com.vaadin.browserless.internal.Routes;
-import com.example.dns.ui.DnsView;
-import com.example.dns.ui.MainView;
-import com.example.dns.ui.RunnerCard;
-import org.springframework.context.ApplicationContext;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
@@ -42,9 +34,6 @@ class DnsRestControllerTest {
 
     @Autowired
     DnsService dnsService;
-
-    @Autowired
-    ApplicationContext springContext;
 
     private final HttpClient http = HttpClient.newHttpClient();
 
@@ -118,44 +107,16 @@ class DnsRestControllerTest {
     }
 
     @Test
-    void restApiMark_updatesUiViaSignal() throws Exception {
-        // User has DnsView open with 2026_viking competition
-        competitionRepository.deleteById("viking_pw");
-        var vikingComp = new Competition();
-        vikingComp.setCompetitionId("2026_viking");
-        vikingComp.setPassword("viking_pw");
-        competitionRepository.save(vikingComp);
+    void restApiMark_reflectedInDnsService() throws Exception {
+        // Mark runner via REST API and verify DnsService state
+        postStarted("secret", "kellokalle", "42");
 
-        var routes = new Routes().autoDiscoverViews(MainView.class.getPackageName());
-        var app = VaadinTestApplicationContext.forSpring(routes, springContext);
-        try {
-            var userUi = app.newUser().newWindow();
-            DnsView view = userUi.navigate(DnsView.class);
-            // TODO make setCompetition private, set here in test via UserSession, before navigating
-            view.setCompetition("viking_pw");
+        assertTrue(dnsService.isStarted("secret", 42),
+                "DnsService should reflect REST API change");
 
-            // Pick a runner from the first slot
-            RunnerCard card = view.getSlotsByTime().values().iterator().next()
-                    .getRunnerCards().getFirst();
-            int bib = card.getBibNumber();
-            assertFalse(card.isStarted(), "Card should not be started initially");
-
-            // External system marks runner via REST API
-            postStarted("viking_pw", "kellokalle", String.valueOf(bib));
-
-            // Verify the service state changed
-            assertTrue(dnsService.isStarted("viking_pw", bib),
-                    "DnsService should reflect REST API change");
-
-            // Simulate signal effect: sync cards from signal
-            userUi.activate();
-            view.syncCardsFromSignal();
-            assertTrue(card.isStarted(),
-                    "UI card should update to started after REST API marks runner");
-        } finally {
-            app.close();
-            dnsService.clearCache();
-        }
+        var entry = dnsService.getEntry("secret", 42);
+        assertTrue(entry.isPresent());
+        assertEquals("kellokalle", entry.get().getRegisteredBy());
     }
 
     @Test

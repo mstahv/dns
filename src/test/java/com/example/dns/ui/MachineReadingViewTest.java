@@ -62,6 +62,9 @@ class MachineReadingViewTest {
         var routes = new Routes().autoDiscoverViews(MainView.class.getPackageName());
         app = VaadinTestApplicationContext.forSpring(routes, springContext);
         ui = app.newUser().newWindow();
+
+        var userSession = springContext.getBean(com.example.dns.service.UserSession.class);
+        userSession.setPassword(PASSWORD);
     }
 
     @AfterEach

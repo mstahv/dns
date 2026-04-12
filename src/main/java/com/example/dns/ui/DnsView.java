@@ -5,55 +5,81 @@ import com.example.dns.service.DnsService;
 import com.example.dns.service.TulospalveluService;
 import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.AttachEvent;
+import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.DetachEvent;
+import com.vaadin.flow.component.UI;
+import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.button.ButtonVariant;
+import com.vaadin.flow.component.checkbox.CheckboxGroup;
 import com.vaadin.flow.component.confirmdialog.ConfirmDialog;
-import com.vaadin.flow.component.html.H1;
+import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.notification.Notification;
+import com.vaadin.flow.component.orderedlayout.FlexComponent;
+import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
+import com.vaadin.flow.component.textfield.TextField;
+import com.vaadin.flow.data.value.ValueChangeMode;
 import com.vaadin.flow.dom.ElementEffect;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.signals.shared.SharedNumberSignal;
+import org.orienteering.datastandard._3.PersonStart;
 import org.orienteering.datastandard._3.StartList;
-import org.vaadin.firitin.util.IntersectionObserver;
+import org.vaadin.firitin.appframework.MenuItem;
+import org.vaadin.firitin.components.button.VButton;
+import org.vaadin.firitin.components.cssgrid.CssGrid;
+import org.vaadin.firitin.components.popover.PopoverButton;
+import org.vaadin.firitin.layouts.HorizontalFloatLayout;
 
 import javax.xml.datatype.XMLGregorianCalendar;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeMap;
 import java.util.TreeSet;
 
 @Route(value = "dns")
+@MenuItem(title = "DNS", order = 0, icon = VaadinIcon.CLOCK)
 public class DnsView extends VerticalLayout {
 
     static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
-    private static final int INITIAL_SLOTS = 10;
 
     private final CompetitionRepository competitionRepository;
     private final TulospalveluService tulospalveluService;
     private final DnsService dnsService;
     private final UserSession userSession;
-    private final Map<LocalTime, StartTimeSlot> slotsByTime = new LinkedHashMap<>();
-    private final List<StartTimeSlot> slotList = new ArrayList<>();
-    private final Map<Integer, RunnerCard> cardsByBib = new HashMap<>();
-    private final Set<String> allStartPlaces = new TreeSet<>();
 
     private String password;
     private String competitionId;
     private SharedNumberSignal changeSignal;
     private java.util.function.Consumer<String> startListListener;
-    private int materializedCount;
-    private Set<String> selectedStartPlaces = Set.of();
+
+    // All start times sorted, with their pending runner data
+    private List<LocalTime> sortedTimes = List.of();
+    private Map<LocalTime, List<PendingRunner>> runnersByTime = Map.of();
+    private Set<String> allStartPlaces = Set.of();
+
+    // Current displayed slot
+    private int currentIndex = -1;
+    private final Map<Integer, RunnerCard> cardsByBib = new HashMap<>();
+    private PopoverButton timeButton;
+    private VerticalLayout slotContainer;
+    private CssGrid runnersGrid;
+    private Button autoButton;
+    private boolean autoMode = true;
+    private LocalTime lastAutoTime;
+    private long autoOffsetMinutes; // offset from real time, e.g. +4 if user scrolled 4 min ahead
+
+    // Filters
     private String nameFilter = "";
     private String numberFilter = "";
     private boolean showStarted = true;
     private boolean showNotStarted = true;
+    private Set<String> selectedStartPlaces = Set.of();
 
     public DnsView(CompetitionRepository competitionRepository,
                    TulospalveluService tulospalveluService, DnsService dnsService,
@@ -62,7 +88,7 @@ public class DnsView extends VerticalLayout {
         this.tulospalveluService = tulospalveluService;
         this.dnsService = dnsService;
         this.userSession = userSession;
-        setWidthFull();
+        setSizeFull();
         getStyle().set("--vaadin-card-title-font-size", "var(--aura-font-size-xl)");
 
         setCompetition(userSession.getPassword());
@@ -77,13 +103,7 @@ public class DnsView extends VerticalLayout {
                 .map(c -> c.getCompetitionId())
                 .orElse(password);
         removeAll();
-        slotsByTime.clear();
-        slotList.clear();
         cardsByBib.clear();
-        allStartPlaces.clear();
-        materializedCount = 0;
-
-        add(new H1("DNS - " + competitionId));
 
         StartList startList = tulospalveluService.getStartList(competitionId);
         if (startList == null) {
@@ -91,99 +111,321 @@ public class DnsView extends VerticalLayout {
         }
 
         changeSignal = dnsService.getChangeSignal(password);
+        parseStartList(startList);
+        buildToolbar();
 
-        var sortedTimes = new TreeMap<LocalTime, StartTimeSlot>();
-        for (var classStart : startList.getClassStart()) {
-            for (var personStart : classStart.getPersonStart()) {
-                for (var raceStart : personStart.getStart()) {
-                    LocalTime time = toLocalTime(raceStart.getStartTime());
-                    if (time != null) {
-                        sortedTimes.computeIfAbsent(time, StartTimeSlot::new);
-                    }
-                }
-            }
+        slotContainer = new VerticalLayout();
+        slotContainer.setPadding(false);
+        slotContainer.setWidthFull();
+        addAndExpand(slotContainer);
+
+        // Navigate to next upcoming start time
+        int next = findNextUpcomingTimeIndex(LocalTime.now());
+        if (next >= 0) {
+            lastAutoTime = sortedTimes.get(next);
+            showSlot(next);
         }
+    }
+
+    private void parseStartList(StartList startList) {
+        var timeSet = new TreeSet<LocalTime>();
+        var byTime = new HashMap<LocalTime, List<PendingRunner>>();
+        var places = new TreeSet<String>();
 
         for (var classStart : startList.getClassStart()) {
             String className = classStart.getClazz() != null
                     ? classStart.getClazz().getName() : "";
-
             String startPlace = "";
             if (!classStart.getStartName().isEmpty()) {
                 startPlace = classStart.getStartName().getFirst().getValue();
             }
             if (startPlace != null && !startPlace.isBlank()) {
-                allStartPlaces.add(startPlace);
+                places.add(startPlace);
             }
+            String sp = startPlace != null ? startPlace : "";
 
             for (var personStart : classStart.getPersonStart()) {
                 for (var raceStart : personStart.getStart()) {
                     LocalTime time = toLocalTime(raceStart.getStartTime());
-                    if (time == null) {
-                        continue;
-                    }
+                    if (time == null) continue;
                     int bib = parseBibNumber(raceStart.getBibNumber());
-                    var slot = sortedTimes.get(time);
-                    if (slot != null) {
-                        slot.addPendingRunner(personStart, className, bib, startPlace,
-                                toLocalDateTime(raceStart.getStartTime()));
-                    }
+                    timeSet.add(time);
+                    byTime.computeIfAbsent(time, k -> new ArrayList<>())
+                            .add(new PendingRunner(personStart, className, bib, sp,
+                                    toLocalDateTime(raceStart.getStartTime())));
                 }
             }
         }
-
-        slotsByTime.putAll(sortedTimes);
-        slotList.addAll(sortedTimes.values());
-        slotList.forEach(this::add);
-
-        materializeMore(INITIAL_SLOTS);
+        sortedTimes = new ArrayList<>(timeSet);
+        runnersByTime = byTime;
+        allStartPlaces = places;
     }
 
-    private void materializeMore(int targetTotal) {
-        // Get current started bibs from signal
+    private void buildToolbar() {
+        var prevButton = new Button(VaadinIcon.ARROW_LEFT.create(), e -> {
+            autoMode = false;
+            updateAutoButton();
+            if (currentIndex > 0) showSlot(currentIndex - 1);
+        }) {{ addThemeVariants(ButtonVariant.TERTIARY); }};
+
+        timeButton = new PopoverButton(this::createTimeNavigationPanel) {{
+            getStyle()
+                    .setFontSize("1.5em")
+                    .setFontWeight("bold")
+                    .setMinWidth("5em");
+            addThemeVariants(ButtonVariant.TERTIARY, ButtonVariant.LUMO_TERTIARY_INLINE);
+            setIcon(null);
+        }};
+
+        var nextButton = new Button(VaadinIcon.ARROW_RIGHT.create(), e -> {
+            autoMode = false;
+            updateAutoButton();
+            if (currentIndex < sortedTimes.size() - 1) showSlot(currentIndex + 1);
+        }) {{ addThemeVariants(ButtonVariant.TERTIARY); }};
+
+        autoButton = new VButton(VaadinIcon.CLOCK, e -> {
+            autoMode = !autoMode;
+            updateAutoButton();
+            if (autoMode) {
+                // Calculate offset: how far ahead/behind the user has scrolled
+                if (currentIndex >= 0 && currentIndex < sortedTimes.size()) {
+                    LocalTime currentSlotTime = sortedTimes.get(currentIndex);
+                    LocalTime now = LocalTime.now();
+                    autoOffsetMinutes = java.time.Duration.between(now, currentSlotTime).toMinutes();
+                } else {
+                    autoOffsetMinutes = 0;
+                }
+                // Don't jump — stay on current slot, future minute ticks will apply offset
+                lastAutoTime = currentIndex >= 0 ? sortedTimes.get(currentIndex) : null;
+            }
+        });
+        updateAutoButton();
+
+        var searchButton = new PopoverButton(this::createSearchPanel) {{
+            setIcon(VaadinIcon.SEARCH.create());
+            addThemeVariants(ButtonVariant.TERTIARY);
+        }};
+
+        var toolbar = new HorizontalLayout(prevButton, timeButton, nextButton, autoButton, searchButton){{
+            setSpacing(false);
+        }};
+        toolbar.setAlignItems(FlexComponent.Alignment.CENTER);
+        toolbar.setWidthFull();
+        toolbar.setJustifyContentMode(FlexComponent.JustifyContentMode.CENTER);
+        add(toolbar);
+    }
+
+    private void updateAutoButton() {
+        if (autoMode) {
+            autoButton.addThemeVariants(ButtonVariant.PRIMARY);
+        } else {
+            autoButton.removeThemeVariants(ButtonVariant.PRIMARY);
+        }
+    }
+
+    private Component createTimeNavigationPanel() {
+        var layout = new VerticalLayout();
+        layout.setWidth("250px");
+        layout.setPadding(true);
+
+        var nowButton = new Button("Nyt", VaadinIcon.CLOCK.create(), e -> {
+            autoMode = false;
+            autoOffsetMinutes = 0;
+            updateAutoButton();
+            int next = findNextUpcomingTimeIndex(LocalTime.now());
+            if (next >= 0) showSlot(next);
+            timeButton.close();
+        });
+        nowButton.setWidthFull();
+        layout.add(nowButton);
+
+        var timeField = new TextField("Siirry aikaan"){{
+            setWidth("6em");
+            setPlaceholder("HH:mm");
+        }};
+        if (currentIndex >= 0 && currentIndex < sortedTimes.size()) {
+            timeField.setValue(sortedTimes.get(currentIndex).format(TIME_FORMAT));
+        }
+
+        var goButton = new Button("Siirry", e -> {
+            String val = timeField.getValue().trim().replace('.', ':');
+            try {
+                LocalTime target = LocalTime.parse(val);
+                autoMode = false;
+                updateAutoButton();
+                int idx = findNearestTimeIndex(target);
+                if (idx >= 0) showSlot(idx);
+                timeButton.close();
+            } catch (Exception ignored) {
+                Notification.show("Virheellinen aika");
+            }
+        });
+        goButton.addThemeVariants(ButtonVariant.PRIMARY);
+
+        var minus10 = new Button("-10 min", e -> {
+            if (currentIndex >= 0) {
+                LocalTime current = sortedTimes.get(currentIndex);
+                LocalTime target = current.minusMinutes(10);
+                autoMode = false;
+                updateAutoButton();
+                int idx = findNearestTimeIndex(target);
+                if (idx >= 0) showSlot(idx);
+            }
+        });
+
+        var plus10 = new Button("+10 min", e -> {
+            if (currentIndex >= 0) {
+                LocalTime current = sortedTimes.get(currentIndex);
+                LocalTime target = current.plusMinutes(10);
+                autoMode = false;
+                updateAutoButton();
+                int idx = findNearestTimeIndex(target);
+                if (idx >= 0) showSlot(idx);
+            }
+        });
+
+        var jumpRow = new HorizontalLayout(minus10, plus10);
+        jumpRow.setWidthFull();
+        jumpRow.setJustifyContentMode(FlexComponent.JustifyContentMode.BETWEEN);
+
+        var closeButton = new Button("Sulje", e -> timeButton.close());
+        closeButton.addThemeVariants(ButtonVariant.TERTIARY);
+        closeButton.setWidthFull();
+
+        layout.add(new HorizontalFloatLayout(timeField, goButton), jumpRow, closeButton);
+        return layout;
+    }
+
+    private Component createSearchPanel() {
+        var layout = new VerticalLayout();
+        layout.setWidth("300px");
+        layout.setPadding(true);
+
+        var nameField = new TextField("Nimihaku");
+        nameField.setPlaceholder("Nimi...");
+        nameField.setClearButtonVisible(true);
+        nameField.setValueChangeMode(ValueChangeMode.LAZY);
+        nameField.setWidthFull();
+        nameField.setValue(nameFilter);
+        nameField.addValueChangeListener(e -> {
+            nameFilter = e.getValue() != null ? e.getValue().toLowerCase().trim() : "";
+            applyFilters();
+        });
+
+        var numberField = new TextField("Numerohaku");
+        numberField.setPlaceholder("Numero...");
+        numberField.setClearButtonVisible(true);
+        numberField.setValueChangeMode(ValueChangeMode.LAZY);
+        numberField.setWidthFull();
+        numberField.setValue(numberFilter);
+        numberField.addValueChangeListener(e -> {
+            numberFilter = e.getValue() != null ? e.getValue().trim() : "";
+            applyFilters();
+        });
+
+        var startedFilter = new CheckboxGroup<String>("Näytä");
+        startedFilter.setItems("Lähteneet", "Ei lähteneet");
+        if (showStarted) startedFilter.select("Lähteneet");
+        if (showNotStarted) startedFilter.select("Ei lähteneet");
+        startedFilter.addValueChangeListener(e -> {
+            showStarted = e.getValue().contains("Lähteneet");
+            showNotStarted = e.getValue().contains("Ei lähteneet");
+            applyFilters();
+        });
+
+        layout.add(nameField, numberField, startedFilter);
+
+        if (!allStartPlaces.isEmpty()) {
+            var placeFilter = new CheckboxGroup<String>("Lähtöpaikka");
+            placeFilter.setItems(allStartPlaces);
+            if (!selectedStartPlaces.isEmpty()) placeFilter.setValue(selectedStartPlaces);
+            placeFilter.addValueChangeListener(e -> {
+                selectedStartPlaces = e.getValue();
+                applyFilters();
+            });
+            layout.add(placeFilter);
+        }
+
+        var clearButton = new Button("Tyhjennä", e -> {
+            nameField.clear();
+            numberField.clear();
+            startedFilter.select("Lähteneet", "Ei lähteneet");
+            nameFilter = "";
+            numberFilter = "";
+            showStarted = true;
+            showNotStarted = true;
+            selectedStartPlaces = Set.of();
+            applyFilters();
+        });
+        clearButton.addThemeVariants(ButtonVariant.TERTIARY);
+        clearButton.setWidthFull();
+
+        // "Sulje" button to close the popover — users expect a close action
+        var closeButton = new Button("Sulje", e -> {
+            // Walk up to find the PopoverButton and close it
+            getParent().ifPresent(p -> p.getParent().ifPresent(pp -> {
+                if (pp instanceof PopoverButton pb) pb.close();
+            }));
+        });
+        closeButton.addThemeVariants(ButtonVariant.PRIMARY);
+        closeButton.setWidthFull();
+
+        layout.add(clearButton, closeButton);
+        return layout;
+    }
+
+    private void showSlot(int index) {
+        if (index < 0 || index >= sortedTimes.size()) return;
+        currentIndex = index;
+        cardsByBib.clear();
+
+        LocalTime time = sortedTimes.get(index);
+        timeButton.setText(time.format(TIME_FORMAT)
+                + " (" + (index + 1) + "/" + sortedTimes.size() + ")");
+
+        slotContainer.removeAll();
+
+        runnersGrid = new CssGrid();
+        runnersGrid.setTemplateColumns("repeat(auto-fill, minmax(220px, 1fr))");
+        runnersGrid.setGap("8px");
+        runnersGrid.setWidthFull();
+
         Set<Integer> startedBibs = dnsService.getStartedBibs(password);
+        List<PendingRunner> runners = runnersByTime.getOrDefault(time, List.of());
 
-        int end = Math.min(targetTotal, slotList.size());
-        int previousCount = materializedCount;
-        for (int i = materializedCount; i < end; i++) {
-            slotList.get(i).materialize(password, dnsService, startedBibs,
-                    this::onCardClicked);
-            // Register cards for signal-driven updates
-            for (RunnerCard card : slotList.get(i).getRunnerCards()) {
-                cardsByBib.put(card.getBibNumber(), card);
+        var sorted = new ArrayList<>(runners);
+        sorted.sort(Comparator.comparing(p -> formatName(p.personStart())));
+
+        for (var pending : sorted) {
+            var card = new RunnerCard(pending.personStart(), pending.className(),
+                    pending.bibNumber(), pending.startPlace(), time,
+                    pending.startDateTime(), password, dnsService);
+            if (startedBibs.contains(pending.bibNumber())) {
+                card.setStarted(true);
             }
+            card.addCardClickListener(this::onCardClicked);
+            card.setVisible(matchesRunner(card));
+            cardsByBib.put(card.getBibNumber(), card);
+            runnersGrid.add(card);
         }
-        materializedCount = Math.max(materializedCount, end);
 
-        for (int i = previousCount; i < materializedCount; i++) {
-            applyFiltersToSlot(slotList.get(i));
-        }
+        slotContainer.add(runnersGrid);
     }
 
-    public void syncCardsFromSignal() {
-        for (var entry : cardsByBib.entrySet()) {
-            boolean shouldBeStarted = dnsService.isStarted(password, entry.getKey());
-            RunnerCard card = entry.getValue();
-            if (card.isStarted() != shouldBeStarted) {
-                card.setStarted(shouldBeStarted);
-            }
-        }
-    }
-
-    private void applyFiltersToSlot(StartTimeSlot slot) {
-        if (!slot.isMaterialized()) {
-            return;
-        }
-        for (RunnerCard card : slot.getRunnerCards()) {
+    private void applyFilters() {
+        for (RunnerCard card : cardsByBib.values()) {
             card.setVisible(matchesRunner(card));
         }
     }
 
-    private void ensureMaterializedFrom(int fromIndex) {
-        int target = Math.min(fromIndex + INITIAL_SLOTS, slotList.size());
-        if (target > materializedCount) {
-            materializeMore(target);
-        }
+    private boolean matchesRunner(RunnerCard card) {
+        if (card.isStarted() && !showStarted) return false;
+        if (!card.isStarted() && !showNotStarted) return false;
+        if (!selectedStartPlaces.isEmpty() && !card.getStartPlace().isEmpty()
+                && !selectedStartPlaces.contains(card.getStartPlace())) return false;
+        if (!nameFilter.isEmpty() && !card.getName().toLowerCase().contains(nameFilter)) return false;
+        if (!numberFilter.isEmpty() && !String.valueOf(card.getBibNumber()).contains(numberFilter)) return false;
+        return true;
     }
 
     void onCardClicked(RunnerCard card) {
@@ -210,14 +452,62 @@ public class DnsView extends VerticalLayout {
         }
     }
 
+    public void syncCardsFromSignal() {
+        for (var entry : cardsByBib.entrySet()) {
+            boolean shouldBeStarted = dnsService.isStarted(password, entry.getKey());
+            RunnerCard card = entry.getValue();
+            if (card.isStarted() != shouldBeStarted) {
+                card.setStarted(shouldBeStarted);
+            }
+        }
+    }
+
+    private void checkAutoAdvance() {
+        if (!autoMode || sortedTimes.isEmpty()) return;
+        LocalTime target = LocalTime.now().plusMinutes(autoOffsetMinutes);
+        int next = findNextUpcomingTimeIndex(target);
+        if (next >= 0 && next != currentIndex) {
+            LocalTime nextTime = sortedTimes.get(next);
+            if (!nextTime.equals(lastAutoTime)) {
+                lastAutoTime = nextTime;
+                showSlot(next);
+            }
+        }
+    }
+
+    /**
+     * Finds the next upcoming start time (first time that is >= target).
+     * If all times are in the past, returns the last one.
+     */
+    private int findNextUpcomingTimeIndex(LocalTime target) {
+        if (sortedTimes.isEmpty()) return -1;
+        for (int i = 0; i < sortedTimes.size(); i++) {
+            if (!sortedTimes.get(i).isBefore(target)) {
+                return i;
+            }
+        }
+        return sortedTimes.size() - 1;
+    }
+
+    /**
+     * Finds the nearest past or current time (<= target).
+     * Used for manual time navigation.
+     */
+    private int findNearestTimeIndex(LocalTime target) {
+        if (sortedTimes.isEmpty()) return -1;
+        int best = 0;
+        for (int i = 0; i < sortedTimes.size(); i++) {
+            if (!sortedTimes.get(i).isAfter(target)) {
+                best = i;
+            }
+        }
+        return best;
+    }
+
     @Override
     protected void onAttach(AttachEvent attachEvent) {
         super.onAttach(attachEvent);
-        findAncestor(TopLayout.class).initFilters(this);
-        observeUnmaterializedSlots();
 
-        // SharedNumberSignal increments on every mark/unmark from any user.
-        // ElementEffect triggers syncCardsFromSignal when the signal changes.
         if (changeSignal != null) {
             ElementEffect.effect(getElement(), () -> {
                 changeSignal.get();
@@ -225,13 +515,16 @@ public class DnsView extends VerticalLayout {
             });
         }
 
-        // Listen for start list updates (e.g. changed start times, emit numbers)
+        // Add clock to navbar and use minute change for auto-advance
+        var clock = new Clock();
+        clock.addMinuteChangeListener(this::checkAutoAdvance);
+        findAncestor(TopLayout.class).addNavbarHelper(clock);
+
         startListListener = updatedCompetitionId -> {
             if (updatedCompetitionId.equals(competitionId)) {
                 getUI().ifPresent(ui -> ui.access(() -> {
                     Notification.show("Lähtölista päivittynyt, näkymä päivitetään...");
                     setCompetition(password);
-                    findAncestor(TopLayout.class).initFilters(this);
                 }));
             }
         };
@@ -247,123 +540,43 @@ public class DnsView extends VerticalLayout {
         }
     }
 
-    private void observeUnmaterializedSlots() {
-        var observer = IntersectionObserver.get();
-        for (int i = materializedCount; i < slotList.size(); i++) {
-            var slot = slotList.get(i);
-            int index = i;
-            observer.observe(slot, entry -> {
-                if (entry.isIntersecting()) {
-                    ensureMaterializedFrom(index);
-                    observer.unobserve(slot);
-                }
-            });
-        }
-    }
-
     // Exposed for tests
-    void onVisibleSlotChanged(int slotIndex) {
-        ensureMaterializedFrom(slotIndex);
-    }
-
     Map<Integer, RunnerCard> getCardsByBib() {
         return cardsByBib;
     }
 
-    public Map<LocalTime, StartTimeSlot> getSlotsByTime() {
-        return slotsByTime;
+    List<LocalTime> getSortedTimes() {
+        return sortedTimes;
     }
 
-    void scrollToTime(LocalTime time) {
-        StartTimeSlot slot = slotsByTime.get(time);
-        int targetIndex = -1;
-        if (slot == null) {
-            for (int i = 0; i < slotList.size(); i++) {
-                if (!slotList.get(i).getStartTime().isBefore(time)) {
-                    slot = slotList.get(i);
-                    targetIndex = i;
-                    break;
-                }
-            }
-        } else {
-            targetIndex = slotList.indexOf(slot);
-        }
-        if (slot != null) {
-            ensureMaterializedFrom(targetIndex);
-            slot.scrollIntoView();
-        }
+    int getCurrentIndex() {
+        return currentIndex;
     }
 
-    public Set<String> getAllStartPlaces() {
-        return allStartPlaces;
-    }
-
-    void applyFilters(Set<String> startPlaces, String name, String number,
-                      boolean showStarted, boolean showNotStarted) {
-        this.selectedStartPlaces = startPlaces;
-        this.nameFilter = name != null ? name.toLowerCase().trim() : "";
-        this.numberFilter = number != null ? number.trim() : "";
-        this.showStarted = showStarted;
-        this.showNotStarted = showNotStarted;
-
-        if (!nameFilter.isEmpty() || !numberFilter.isEmpty()) {
-            materializeMore(slotList.size());
-        }
-
-        for (StartTimeSlot slot : slotList) {
-            applyFiltersToSlot(slot);
-        }
-    }
-
-    private boolean matchesRunner(RunnerCard card) {
-        if (card.isStarted() && !showStarted) {
-            return false;
-        }
-        if (!card.isStarted() && !showNotStarted) {
-            return false;
-        }
-        if (!selectedStartPlaces.isEmpty() && !card.getStartPlace().isEmpty()) {
-            if (!selectedStartPlaces.contains(card.getStartPlace())) {
-                return false;
-            }
-        }
-        if (!nameFilter.isEmpty()) {
-            if (!card.getName().toLowerCase().contains(nameFilter)) {
-                return false;
-            }
-        }
-        if (!numberFilter.isEmpty()) {
-            if (!String.valueOf(card.getBibNumber()).contains(numberFilter)) {
-                return false;
-            }
-        }
-        return true;
+    private static String formatName(PersonStart ps) {
+        if (ps.getPerson() == null || ps.getPerson().getName() == null) return "?";
+        var name = ps.getPerson().getName();
+        return name.getGiven() + " " + name.getFamily();
     }
 
     private static LocalTime toLocalTime(XMLGregorianCalendar cal) {
-        if (cal == null) {
-            return null;
-        }
+        if (cal == null) return null;
         return LocalTime.of(cal.getHour(), cal.getMinute(), cal.getSecond());
     }
 
     private static LocalDateTime toLocalDateTime(XMLGregorianCalendar cal) {
-        if (cal == null) {
-            return null;
-        }
-        return LocalDateTime.of(
-                cal.getYear(), cal.getMonth(), cal.getDay(),
+        if (cal == null) return null;
+        return LocalDateTime.of(cal.getYear(), cal.getMonth(), cal.getDay(),
                 cal.getHour(), cal.getMinute(), cal.getSecond());
     }
 
     private static int parseBibNumber(String bib) {
-        if (bib == null || bib.isBlank()) {
-            return 0;
-        }
-        try {
-            return Integer.parseInt(bib.trim());
-        } catch (NumberFormatException e) {
-            return 0;
-        }
+        if (bib == null || bib.isBlank()) return 0;
+        try { return Integer.parseInt(bib.trim()); }
+        catch (NumberFormatException e) { return 0; }
+    }
+
+    record PendingRunner(PersonStart personStart, String className,
+                         int bibNumber, String startPlace, LocalDateTime startDateTime) {
     }
 }

@@ -19,6 +19,7 @@ import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
+import org.vaadin.firitin.appframework.MenuItem;
 import org.vaadin.firitin.util.BrowserPrompt;
 
 import java.time.format.DateTimeFormatter;
@@ -27,6 +28,7 @@ import java.util.stream.Collectors;
 
 @Route("machine-readings")
 @PageTitle("Koneluenta")
+@MenuItem(icon = VaadinIcon.AUTOMATION)
 public class MachineReadingView extends VerticalLayout {
 
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");

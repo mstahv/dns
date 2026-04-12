@@ -171,6 +171,14 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
         }
     }
 
+    /**
+     * Returns true if the given machine has an active WebSocket connection.
+     */
+    public boolean isOnline(Machine machine) {
+        return sessionMachines.values().stream()
+                .anyMatch(m -> m.getId().equals(machine.getId()));
+    }
+
     private void sendStartListData(WebSocketSession session, Machine machine) throws IOException {
         Map<String, ControlCardEntry> data = machineReadingService.buildStartListDataForMachine(machine);
         String json = objectMapper.writeValueAsString(Map.of("type", "startlist", "data", data));

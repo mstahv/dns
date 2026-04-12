@@ -9,15 +9,20 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 @EnableWebSocket
 public class WebSocketConfig implements WebSocketConfigurer {
 
-    private final MachineReadingWebSocketHandler handler;
+    private final MachineReadingWebSocketHandler machineReadingHandler;
+    private final DnsWebSocketHandler dnsHandler;
 
-    public WebSocketConfig(MachineReadingWebSocketHandler handler) {
-        this.handler = handler;
+    public WebSocketConfig(MachineReadingWebSocketHandler machineReadingHandler,
+                           DnsWebSocketHandler dnsHandler) {
+        this.machineReadingHandler = machineReadingHandler;
+        this.dnsHandler = dnsHandler;
     }
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
-        registry.addHandler(handler, "/ws/machine-reading")
+        registry.addHandler(machineReadingHandler, "/ws/machine-reading")
+                .setAllowedOrigins("*");
+        registry.addHandler(dnsHandler, "/ws/started")
                 .setAllowedOrigins("*");
     }
 }

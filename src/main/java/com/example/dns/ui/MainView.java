@@ -13,11 +13,13 @@ import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.page.WebStorage;
 import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
+import com.vaadin.flow.router.BeforeEnterEvent;
+import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.Route;
 import org.vaadin.firitin.appframework.MenuItem;
 
 @Route(value = "", autoLayout = false)
-@MenuItem(title = "Kisan valinta", order = MenuItem.END)
+@MenuItem(title = "Kisan valinta", order = MenuItem.END, hidden = true)
 public class MainView extends VerticalLayout {
 
     private static final String LS_USER_NAME = "dns-user-name";

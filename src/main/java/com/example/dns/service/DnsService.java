@@ -6,18 +6,25 @@ import com.vaadin.flow.signals.shared.SharedNumberSignal;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 @Service
 public class DnsService {
 
+    public record StartedEvent(String password, int bibNumber, String registeredBy, boolean started) {
+    }
+
     private final DnsEntryRepository repository;
     private final Map<String, Set<Integer>> startedCache = new ConcurrentHashMap<>();
     private final Map<String, SharedNumberSignal> changeCounters = new ConcurrentHashMap<>();
+    private final List<Consumer<StartedEvent>> startedListeners = new CopyOnWriteArrayList<>();
 
     public DnsService(DnsEntryRepository repository) {
         this.repository = repository;
@@ -46,6 +53,7 @@ public class DnsService {
         repository.save(entry);
 
         getChangeSignal(password).incrementBy(1);
+        notifyListeners(new StartedEvent(password, bibNumber, registeredBy, true));
     }
 
     public void unmarkStarted(String password, int bibNumber) {
@@ -57,6 +65,7 @@ public class DnsService {
                 .ifPresent(repository::delete);
 
         getChangeSignal(password).incrementBy(1);
+        notifyListeners(new StartedEvent(password, bibNumber, null, false));
     }
 
     public boolean isStarted(String password, int bibNumber) {
@@ -67,6 +76,24 @@ public class DnsService {
         return repository.findByPassword(password).stream()
                 .filter(e -> e.getCompetitorNumber() == bibNumber)
                 .findFirst();
+    }
+
+    public void addStartedListener(Consumer<StartedEvent> listener) {
+        startedListeners.add(listener);
+    }
+
+    public void removeStartedListener(Consumer<StartedEvent> listener) {
+        startedListeners.remove(listener);
+    }
+
+    private void notifyListeners(StartedEvent event) {
+        for (var listener : startedListeners) {
+            try {
+                listener.accept(event);
+            } catch (Exception e) {
+                // ignore listener errors
+            }
+        }
     }
 
     public void clearCache() {

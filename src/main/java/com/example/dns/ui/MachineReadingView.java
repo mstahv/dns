@@ -39,6 +39,7 @@ public class MachineReadingView extends VerticalLayout {
     private String password;
     private Grid<CompetitionMachine> machineGrid;
     private Grid<MachineReading> readingGrid;
+    private ComboBox<Machine> addMachineCombo;
 
     public MachineReadingView(MachineRepository machineRepository,
                               CompetitionMachineRepository competitionMachineRepository,
@@ -64,8 +65,18 @@ public class MachineReadingView extends VerticalLayout {
     }
 
     private void buildView() {
+        var refreshButton = new Button("Päivitä", VaadinIcon.REFRESH.create(),
+                e -> refreshAll());
+        add(refreshButton);
+
         buildMachineSection();
         buildReadingSection();
+    }
+
+    private void refreshAll() {
+        refreshMachines();
+        refreshReadings();
+        refreshCombo(addMachineCombo);
     }
 
     private void buildMachineSection() {
@@ -74,6 +85,8 @@ public class MachineReadingView extends VerticalLayout {
         machineGrid = new Grid<>(CompetitionMachine.class, false);
         machineGrid.addColumn(cm -> cm.getMachine().getMachineId()).setHeader("Kone-ID");
         machineGrid.addColumn(cm -> cm.getMachine().getMachineName()).setHeader("Nimi");
+        machineGrid.addColumn(cm -> webSocketHandler.isOnline(cm.getMachine()) ? "Online" : "")
+                .setHeader("Tila");
         machineGrid.addComponentColumn(this::createRenameButton).setHeader("");
         machineGrid.addComponentColumn(this::createApproveToggle).setHeader("Hyväksytty");
         machineGrid.addComponentColumn(this::createRemoveButton).setHeader("");
@@ -82,23 +95,18 @@ public class MachineReadingView extends VerticalLayout {
 
         add(machineGrid);
         add(createAddMachineRow());
-
-        var refreshButton = new Button("Päivitä", VaadinIcon.REFRESH.create(),
-                e -> { refreshMachines(); refreshReadings(); });
-        add(refreshButton);
     }
 
     private HorizontalLayout createAddMachineRow() {
-        var combo = new ComboBox<Machine>("Lisää olemassa oleva kone kisaan");
-        combo.setItemLabelGenerator(m -> m.getMachineName() + " (" + m.getMachineId() + ")");
-        combo.setWidthFull();
+        addMachineCombo = new ComboBox<>("Lisää olemassa oleva kone kisaan");
+        addMachineCombo.setItemLabelGenerator(m -> m.getMachineName() + " (" + m.getMachineId() + ")");
+        addMachineCombo.setWidthFull();
 
         var addButton = new Button("Lisää", VaadinIcon.PLUS.create(), e -> {
-            Machine selected = combo.getValue();
+            Machine selected = addMachineCombo.getValue();
             if (selected == null) {
                 return;
             }
-            // Check if already associated
             if (competitionMachineRepository.findByPasswordAndMachine(password, selected).isPresent()) {
                 return;
             }
@@ -108,14 +116,14 @@ public class MachineReadingView extends VerticalLayout {
             cm.setApproved(false);
             competitionMachineRepository.save(cm);
             webSocketHandler.notifyMachineUpdated(selected);
-            combo.clear();
+            addMachineCombo.clear();
             refreshMachines();
-            refreshCombo(combo);
+            refreshCombo(addMachineCombo);
         });
 
-        refreshCombo(combo);
+        refreshCombo(addMachineCombo);
 
-        var row = new HorizontalLayout(combo, addButton);
+        var row = new HorizontalLayout(addMachineCombo, addButton);
         row.setAlignItems(Alignment.END);
         row.setWidthFull();
         return row;

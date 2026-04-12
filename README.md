@@ -66,6 +66,63 @@ X-Competition-Password: <kisasalasana>
 - `200 OK` — pilkulla erotettu lista kilpailijanumeroita (text/plain), jotka on merkitty lähteneeksi kyseisillä lähtöajoilla
 - `401 Unauthorized` — väärä salasana
 
+### WebSocket: lähtijäseuranta (ws/started)
+
+Reaaliaikainen rajapinta lähtijätietojen seuraamiseen. Ulkoinen järjestelmä (esim. Kellokalle) saa kaikki lähtömerkinnät ja -perumukset heti kun ne tapahtuvat — riippumatta lähteestä (UI, REST API, koneluenta).
+
+```
+ws://<host>:<port>/ws/started
+```
+
+#### 1. Autentikointi
+
+```json
+→ {"type":"auth","password":"kisasalasana123"}
+← {"type":"auth","ok":true}
+```
+
+#### 2. Alkutila (automaattinen)
+
+Heti autentikoinnin jälkeen palvelin lähettää kaikki tällä hetkellä lähteneeksi merkityt kilpailijanumerot:
+
+```json
+← {"type":"started","bibs":[1,42,100,200]}
+```
+
+#### 3. Reaaliaikaiset tapahtumat
+
+Kun kilpailija merkitään lähteneeksi (mistä tahansa lähteestä):
+
+```json
+← {"type":"mark","bib":42,"registeredBy":"kellokalle"}
+```
+
+Kun merkintä perutaan:
+
+```json
+← {"type":"unmark","bib":42}
+```
+
+#### Tyypillinen vuorovaikutus
+
+```
+Client (esim. Kellokalle)           Server
+  |-- {"type":"auth","password":"X"} -->|
+  |<-- {"type":"auth","ok":true} -------|
+  |<-- {"type":"started","bibs":[1,2]} -|  ← alkutila
+  |                                      |
+  |  (toimitsijaUI merkitsee bib 42)     |
+  |<-- {"type":"mark","bib":42,          |
+  |      "registeredBy":"Matti"} --------|
+  |                                      |
+  |  (koneluenta lukee bib 99)           |
+  |<-- {"type":"mark","bib":99,          |
+  |      "registeredBy":"Lukija-1"} -----|
+  |                                      |
+  |  (merkintä perutaan UI:sta)          |
+  |<-- {"type":"unmark","bib":42} ------|
+```
+
 ### Koneluenta REST (Machine Reading)
 
 Yksinkertainen HTTP-rajapinta konelukijoille. Kone pitää ensin yhdistää kilpailuun ja hyväksyä Koneluenta-sivulla.
@@ -184,3 +241,4 @@ Client                              Server
   |   päivittyy, esim. emit-muutos)       |
   |<-- {"type":"startlist","data":{...}} |  ← uudet tiedot pushataan automaattisesti
 ```
+

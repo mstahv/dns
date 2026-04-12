@@ -1,15 +1,18 @@
 package com.example.dns.ui;
 
+import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.CheckboxGroup;
-import com.vaadin.flow.component.dependency.StyleSheet;
 import com.vaadin.flow.component.html.Hr;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.component.timepicker.TimePicker;
 import com.vaadin.flow.data.value.ValueChangeMode;
+import com.vaadin.flow.router.BeforeEnterEvent;
+import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.Layout;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.vaadin.firitin.appframework.MainLayout;
 
 import java.time.Duration;
@@ -17,13 +20,19 @@ import java.time.LocalTime;
 import java.util.Set;
 
 @Layout
-public class TopLayout extends MainLayout {
+public class TopLayout extends MainLayout implements BeforeEnterObserver {
 
     private CheckboxGroup<String> startPlaceSelect;
     private CheckboxGroup<String> startedFilter;
     private TextField nameField;
     private TextField numberField;
     private DnsView currentDnsView;
+
+    UserSession userSession;
+
+    public TopLayout(UserSession userSession) {
+        this.userSession = userSession;
+    }
 
     @Override
     protected Object getDrawerHeader() {
@@ -124,5 +133,13 @@ public class TopLayout extends MainLayout {
         boolean showStarted = startedFilter == null || startedFilter.getValue().contains("Lähteneet");
         boolean showNotStarted = startedFilter == null || startedFilter.getValue().contains("Ei lähteneet");
         currentDnsView.applyFilters(places, name, number, showStarted, showNotStarted);
+    }
+
+
+    @Override
+    public void beforeEnter(BeforeEnterEvent event) {
+        if(event.getNavigationTarget() != MainView.class && userSession.getPassword() == null) {
+            event.forwardTo(MainView.class);
+        }
     }
 }

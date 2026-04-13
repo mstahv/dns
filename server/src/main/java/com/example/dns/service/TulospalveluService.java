@@ -20,6 +20,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.time.Instant;
 import java.time.Year;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -48,7 +49,8 @@ public class TulospalveluService {
     private final Map<String, FileTime> diskWriteTimeCache = new ConcurrentHashMap<>();
     private final Set<String> locallyOverridden = ConcurrentHashMap.newKeySet();
     private final List<Consumer<String>> startListUpdateListeners = new CopyOnWriteArrayList<>();
-    private List<CompetitionInfo> eventsCache;
+    private volatile List<CompetitionInfo> eventsCache;
+    private volatile Instant eventsCacheTime;
 
     public TulospalveluService() throws JAXBException {
         this.jaxbContext = JAXBContext.newInstance(StartList.class);
@@ -56,13 +58,19 @@ public class TulospalveluService {
 
     @SuppressWarnings("unchecked")
     public List<CompetitionInfo> getOrienteeringEvents() {
-        if (eventsCache != null) {
+        if (eventsCache != null && eventsCacheTime != null
+                && Instant.now().isBefore(eventsCacheTime.plusSeconds(5 * 60))) {
             return eventsCache;
         }
         try {
             String url = EVENTS_URL + Year.now().getValue();
-            String json = fetchWithDiskCache("events_" + Year.now().getValue() + ".json", url);
-            Map<String, Object> root = objectMapper.readValue(json, Map.class);
+            log.info("Downloading events from {}", url);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            Map<String, Object> root = objectMapper.readValue(response.body(), Map.class);
             List<Map<String, Object>> data = (List<Map<String, Object>>) root.get("data");
 
             eventsCache = data.stream()
@@ -70,9 +78,13 @@ public class TulospalveluService {
                     .filter(c -> "Orienteering".equals(c.discipline()))
                     .filter(c -> c.startListUrl() != null)
                     .toList();
+            eventsCacheTime = Instant.now();
             return eventsCache;
         } catch (IOException | InterruptedException e) {
             log.error("Failed to fetch events", e);
+            if (eventsCache != null) {
+                return eventsCache;
+            }
             return Collections.emptyList();
         }
     }
@@ -382,6 +394,7 @@ public class TulospalveluService {
 
     public void clearCache() {
         eventsCache = null;
+        eventsCacheTime = null;
         startListCache.clear();
         createTimeCache.clear();
         diskWriteTimeCache.clear();

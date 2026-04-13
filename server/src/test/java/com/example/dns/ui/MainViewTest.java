@@ -71,10 +71,16 @@ class MainViewTest {
         PasswordField loginPasswordField = staffUser.get(PasswordField.class).first();
         staffUser.test(loginPasswordField).setValue("salasana123");
 
+        /* Not this way */
+        /*
         Button loginButton = staffUser.get(Button.class).all().stream()
                 .filter(b -> "Kirjaudu kisaan".equals(b.getText()))
                 .findFirst().orElseThrow();
         staffUser.test(loginButton).click();
+        */
+        
+        // this is now kind of "right" but not handy
+        staffUser.test(staffUser.get(Button.class).withText("Kirjaudu kisaan").single()).click();
 
         // Should navigate to DnsView
         assertTrue(staffUser.getCurrentView() instanceof DnsView,

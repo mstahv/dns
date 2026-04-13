@@ -278,10 +278,90 @@ public class MachineWebSocket {
                     }
                 });
             }
+        } else if (message.contains("\"type\":\"requestWifiList\"")) {
+            handleWifiListRequest();
+        } else if (message.contains("\"type\":\"addWifi\"")) {
+            handleAddWifiRequest(message);
         } else if (message.contains("\"type\":\"error\"")) {
             LOG.warning("Server error: " + message);
         } else {
             LOG.fine("Unknown message: " + message);
+        }
+    }
+
+    private void handleWifiListRequest() {
+        Thread.ofVirtual().name("wifi-list").start(() -> {
+            try {
+                ProcessBuilder pb = new ProcessBuilder("nmcli", "-t", "-f", "NAME,TYPE", "connection", "show");
+                pb.redirectErrorStream(true);
+                Process process = pb.start();
+                String output = new String(process.getInputStream().readAllBytes()).trim();
+                process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
+
+                // Filter to wifi connections only and extract names
+                StringBuilder wifiNames = new StringBuilder();
+                for (String line : output.split("\n")) {
+                    // Format: NAME:TYPE  e.g. "MyWifi:802-11-wireless"
+                    if (line.contains("wireless")) {
+                        if (!wifiNames.isEmpty()) wifiNames.append("\n");
+                        String name = line.substring(0, line.lastIndexOf(":"));
+                        wifiNames.append(name);
+                    }
+                }
+
+                String escaped = escapeJson(wifiNames.toString());
+                sendResponse("{\"type\":\"wifiList\",\"data\":\"" + escaped + "\"}");
+            } catch (Exception e) {
+                LOG.warning("Failed to list WiFi networks: " + e.getMessage());
+                sendResponse("{\"type\":\"wifiList\",\"data\":\"Virhe: " + escapeJson(e.getMessage()) + "\"}");
+            }
+        });
+    }
+
+    private void handleAddWifiRequest(String message) {
+        Thread.ofVirtual().name("wifi-add").start(() -> {
+            try {
+                java.util.regex.Matcher ssidMatcher = java.util.regex.Pattern.compile("\"ssid\"\\s*:\\s*\"([^\"]*)\"").matcher(message);
+                java.util.regex.Matcher pskMatcher = java.util.regex.Pattern.compile("\"password\"\\s*:\\s*\"([^\"]*)\"").matcher(message);
+
+                if (!ssidMatcher.find()) {
+                    sendResponse("{\"type\":\"wifiAdded\",\"ok\":false,\"message\":\"SSID puuttuu\"}");
+                    return;
+                }
+                String ssid = ssidMatcher.group(1);
+                String psk = pskMatcher.find() ? pskMatcher.group(1) : "";
+
+                ProcessBuilder pb;
+                if (psk.isEmpty()) {
+                    pb = new ProcessBuilder("nmcli", "connection", "add",
+                            "type", "wifi", "con-name", ssid, "ssid", ssid);
+                } else {
+                    pb = new ProcessBuilder("nmcli", "connection", "add",
+                            "type", "wifi", "con-name", ssid, "ssid", ssid,
+                            "wifi-sec.key-mgmt", "wpa-psk", "wifi-sec.psk", psk);
+                }
+                pb.redirectErrorStream(true);
+                Process process = pb.start();
+                String output = new String(process.getInputStream().readAllBytes()).trim();
+                int exitCode = process.waitFor();
+
+                boolean ok = exitCode == 0;
+                sendResponse("{\"type\":\"wifiAdded\",\"ok\":" + ok + ",\"message\":\"" + escapeJson(output) + "\"}");
+                LOG.info("WiFi add result (exit=" + exitCode + "): " + output);
+            } catch (Exception e) {
+                LOG.warning("Failed to add WiFi network: " + e.getMessage());
+                sendResponse("{\"type\":\"wifiAdded\",\"ok\":false,\"message\":\"" + escapeJson(e.getMessage()) + "\"}");
+            }
+        });
+    }
+
+    private void sendResponse(String text) {
+        WebSocket ws = webSocket;
+        if (ws != null && connected) {
+            ws.sendText(text, true).exceptionally(e -> {
+                LOG.warning("Failed to send response: " + e.getMessage());
+                return null;
+            });
         }
     }
 

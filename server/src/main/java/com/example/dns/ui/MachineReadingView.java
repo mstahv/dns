@@ -267,7 +267,11 @@ public class MachineReadingView extends VerticalLayout {
             }
             for (String name : networksData.split("\n")) {
                 if (!name.isBlank()) {
-                    networkList.add(new Span(name.trim()));
+                    var span = new Span(name.trim());
+                    if (name.contains("[aktiivinen]")) {
+                        span.getStyle().setFontWeight(com.vaadin.flow.dom.Style.FontWeight.BOLD);
+                    }
+                    networkList.add(span);
                 }
             }
         }

@@ -292,20 +292,26 @@ public class MachineWebSocket {
     private void handleWifiListRequest() {
         Thread.ofVirtual().name("wifi-list").start(() -> {
             try {
-                ProcessBuilder pb = new ProcessBuilder("nmcli", "-t", "-f", "NAME,TYPE", "connection", "show");
+                ProcessBuilder pb = new ProcessBuilder("nmcli", "-t", "-f", "NAME,TYPE,ACTIVE", "connection", "show");
                 pb.redirectErrorStream(true);
                 Process process = pb.start();
                 String output = new String(process.getInputStream().readAllBytes()).trim();
                 process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS);
 
-                // Filter to wifi connections only and extract names
+                // Filter to wifi connections, mark active one
+                // Format: NAME:802-11-wireless:yes/no
                 StringBuilder wifiNames = new StringBuilder();
                 for (String line : output.split("\n")) {
-                    // Format: NAME:TYPE  e.g. "MyWifi:802-11-wireless"
                     if (line.contains("wireless")) {
                         if (!wifiNames.isEmpty()) wifiNames.append("\n");
-                        String name = line.substring(0, line.lastIndexOf(":"));
+                        boolean active = line.endsWith(":yes");
+                        // Remove type and active fields, keep name
+                        String withoutActive = active
+                                ? line.substring(0, line.lastIndexOf(":"))
+                                : line.substring(0, line.lastIndexOf(":"));
+                        String name = withoutActive.substring(0, withoutActive.lastIndexOf(":"));
                         wifiNames.append(name);
+                        if (active) wifiNames.append(" [aktiivinen]");
                     }
                 }
 

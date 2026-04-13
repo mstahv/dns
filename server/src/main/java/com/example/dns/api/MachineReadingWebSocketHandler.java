@@ -64,6 +64,8 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, WebSocketSession> sessionById = new ConcurrentHashMap<>();
     private final Map<String, String> sessionVersions = new ConcurrentHashMap<>();
     private final Map<Long, CompletableFuture<String>> pendingLogRequests = new ConcurrentHashMap<>();
+    private final Map<Long, CompletableFuture<String>> pendingWifiListRequests = new ConcurrentHashMap<>();
+    private final Map<Long, CompletableFuture<String>> pendingWifiAddRequests = new ConcurrentHashMap<>();
 
     public MachineReadingWebSocketHandler(MachineReadingService machineReadingService,
                                           TulospalveluService tulospalveluService,
@@ -99,6 +101,33 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
             session.sendMessage(new TextMessage(authResponse));
 
             sendStartListData(session, machine);
+            return;
+        }
+
+        // WiFi list response from machine
+        if (node.has("type") && "wifiList".equals(node.get("type").asText())) {
+            Machine m = sessionMachines.get(session.getId());
+            if (m != null) {
+                String data = node.has("data") ? node.get("data").asText() : "(tyhjä)";
+                CompletableFuture<String> pending = pendingWifiListRequests.remove(m.getId());
+                if (pending != null) {
+                    pending.complete(data);
+                }
+            }
+            return;
+        }
+
+        // WiFi add response from machine
+        if (node.has("type") && "wifiAdded".equals(node.get("type").asText())) {
+            Machine m = sessionMachines.get(session.getId());
+            if (m != null) {
+                String message2 = node.has("message") ? node.get("message").asText() : "";
+                boolean ok = node.has("ok") && node.get("ok").asBoolean();
+                CompletableFuture<String> pending = pendingWifiAddRequests.remove(m.getId());
+                if (pending != null) {
+                    pending.complete(ok ? "OK" : "Virhe: " + message2);
+                }
+            }
             return;
         }
 
@@ -145,6 +174,14 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
             CompletableFuture<String> pending = pendingLogRequests.remove(machine.getId());
             if (pending != null) {
                 pending.complete("(Yhteys katkesi)");
+            }
+            CompletableFuture<String> pendingWifi = pendingWifiListRequests.remove(machine.getId());
+            if (pendingWifi != null) {
+                pendingWifi.complete("(Yhteys katkesi)");
+            }
+            CompletableFuture<String> pendingWifiAdd = pendingWifiAddRequests.remove(machine.getId());
+            if (pendingWifiAdd != null) {
+                pendingWifiAdd.complete("(Yhteys katkesi)");
             }
             log.info("WebSocket machine disconnected: {} (session={})", machine.getMachineId(), session.getId());
         }
@@ -290,6 +327,46 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
                                 machine.getMachineId(), session.getId());
                     } catch (IOException e) {
                         log.warn("Failed to send update request to machine {}", machine.getMachineId(), e);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Requests the list of configured WiFi networks from the connected machine.
+     */
+    public CompletableFuture<String> requestWifiList(Machine machine) {
+        CompletableFuture<String> future = new CompletableFuture<>();
+        future.completeOnTimeout("(Aikakatkaisu: konetta ei tavoitettu)", 15, TimeUnit.SECONDS);
+        pendingWifiListRequests.put(machine.getId(), future);
+
+        sendToMachine(machine, Map.of("type", "requestWifiList"));
+        return future;
+    }
+
+    /**
+     * Sends a request to add a new WiFi network to the connected machine.
+     */
+    public CompletableFuture<String> requestAddWifi(Machine machine, String ssid, String psk) {
+        CompletableFuture<String> future = new CompletableFuture<>();
+        future.completeOnTimeout("(Aikakatkaisu: konetta ei tavoitettu)", 15, TimeUnit.SECONDS);
+        pendingWifiAddRequests.put(machine.getId(), future);
+
+        sendToMachine(machine, Map.of("type", "addWifi", "ssid", ssid, "password", psk));
+        return future;
+    }
+
+    private void sendToMachine(Machine machine, Map<String, ?> payload) {
+        for (var entry : sessionMachines.entrySet()) {
+            if (entry.getValue().getId().equals(machine.getId())) {
+                WebSocketSession session = sessionById.get(entry.getKey());
+                if (session != null && session.isOpen()) {
+                    try {
+                        String msg = objectMapper.writeValueAsString(payload);
+                        session.sendMessage(new TextMessage(msg));
+                    } catch (IOException e) {
+                        log.warn("Failed to send message to machine {}", machine.getMachineId(), e);
                     }
                 }
             }

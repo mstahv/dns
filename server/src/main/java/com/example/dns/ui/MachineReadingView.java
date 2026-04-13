@@ -20,6 +20,10 @@ import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.html.Pre;
 import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
+import com.vaadin.flow.component.notification.Notification;
+import com.vaadin.flow.component.notification.NotificationVariant;
+import com.vaadin.flow.component.textfield.PasswordField;
+import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.router.PageTitle;
@@ -141,7 +145,8 @@ public class MachineReadingView extends VerticalLayout {
             Machine machine = cm.getMachine();
             add(new RenameButton(machine));
             if (webSocketHandler.isOnline(machine)) {
-                add(new UpdateButton(machine), new LogButton(machine), new ShutdownButton(machine));
+                add(new UpdateButton(machine), new LogButton(machine),
+                        new WifiButton(machine), new ShutdownButton(machine));
             }
         }
     }
@@ -205,6 +210,109 @@ public class MachineReadingView extends VerticalLayout {
 
             add(pre);
             getFooter().add(new Button("Sulje", ev -> close()));
+        }
+    }
+
+    private class WifiButton extends VButton {
+        WifiButton(Machine machine) {
+            setIcon(VaadinIcon.CONNECT.create());
+            addThemeVariants(ButtonVariant.TERTIARY);
+            setTooltipText("WiFi-verkkojen hallinta");
+            addClickListener(e -> {
+                var currentUI = e.getSource().getUI().orElse(null);
+                if (currentUI == null) return;
+                setEnabled(false);
+                webSocketHandler.requestWifiList(machine).thenAccept(networks ->
+                    currentUI.access(() -> {
+                        setEnabled(true);
+                        new WifiDialog(machine, networks).open();
+                    })
+                );
+            });
+        }
+    }
+
+    private class WifiDialog extends Dialog {
+        private final Machine machine;
+        private final VerticalLayout networkList;
+
+        WifiDialog(Machine machine, String networksData) {
+            this.machine = machine;
+            setHeaderTitle("WiFi-verkot: " + machine.getMachineName());
+            setWidth("500px");
+
+            var content = new VerticalLayout();
+            content.setPadding(false);
+
+            content.add(new H2("Nykyiset verkot"));
+            networkList = new VerticalLayout();
+            networkList.setPadding(false);
+            networkList.setSpacing(false);
+            updateNetworkList(networksData);
+            content.add(networkList);
+
+            content.add(new H2("Lisää uusi verkko"));
+            content.add(new AddWifiForm());
+
+            add(content);
+            getFooter().add(new Button("Sulje", ev -> close()));
+        }
+
+        private void updateNetworkList(String networksData) {
+            networkList.removeAll();
+            if (networksData == null || networksData.isBlank()
+                    || networksData.startsWith("(") || networksData.startsWith("Virhe")) {
+                networkList.add(new Span(networksData != null ? networksData : "Ei verkkoja"));
+                return;
+            }
+            for (String name : networksData.split("\n")) {
+                if (!name.isBlank()) {
+                    networkList.add(new Span(name.trim()));
+                }
+            }
+        }
+
+        private class AddWifiForm extends VerticalLayout {
+            AddWifiForm() {
+                setPadding(false);
+                var ssidField = new TextField("Verkon nimi (SSID)");
+                ssidField.setWidthFull();
+                var passwordField = new PasswordField("Salasana");
+                passwordField.setWidthFull();
+                var addBtn = new Button("Lisää verkko", VaadinIcon.PLUS.create(), e -> {
+                    String ssid = ssidField.getValue().trim();
+                    if (ssid.isEmpty()) return;
+                    String psk = passwordField.getValue();
+                    e.getSource().setEnabled(false);
+
+                    var currentUI = getUI().orElse(null);
+                    if (currentUI == null) return;
+
+                    webSocketHandler.requestAddWifi(machine, ssid, psk).thenAccept(result ->
+                        currentUI.access(() -> {
+                            e.getSource().setEnabled(true);
+                            if ("OK".equals(result)) {
+                                Notification.show("Verkko " + ssid + " lisätty",
+                                        3000, Notification.Position.MIDDLE)
+                                    .addThemeVariants(NotificationVariant.LUMO_SUCCESS);
+                                ssidField.clear();
+                                passwordField.clear();
+                                refreshWifiList(currentUI);
+                            } else {
+                                Notification.show(result, 5000, Notification.Position.MIDDLE)
+                                    .addThemeVariants(NotificationVariant.LUMO_ERROR);
+                            }
+                        })
+                    );
+                });
+                add(ssidField, passwordField, addBtn);
+            }
+        }
+
+        private void refreshWifiList(com.vaadin.flow.component.UI ui) {
+            webSocketHandler.requestWifiList(machine).thenAccept(networks ->
+                ui.access(() -> updateNetworkList(networks))
+            );
         }
     }
 

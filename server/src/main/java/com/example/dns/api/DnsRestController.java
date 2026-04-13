@@ -2,6 +2,7 @@ package com.example.dns.api;
 
 import com.example.dns.domain.CompetitionRepository;
 import com.example.dns.service.DnsService;
+import com.example.dns.service.StartListLookupService;
 import com.example.dns.service.TulospalveluService;
 import org.orienteering.datastandard._3.StartList;
 import org.springframework.http.HttpStatus;
@@ -86,6 +87,7 @@ public class DnsRestController {
         }
 
         String result = startList.getClassStart().stream()
+                .filter(cs -> !StartListLookupService.isIgnoredClass(cs))
                 .flatMap(cs -> cs.getPersonStart().stream())
                 .flatMap(ps -> ps.getStart().stream())
                 .filter(rs -> {

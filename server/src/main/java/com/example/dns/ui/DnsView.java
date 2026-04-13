@@ -2,6 +2,7 @@ package com.example.dns.ui;
 
 import com.example.dns.domain.CompetitionRepository;
 import com.example.dns.service.DnsService;
+import com.example.dns.service.StartListLookupService;
 import com.example.dns.service.TulospalveluService;
 import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.AttachEvent;
@@ -134,6 +135,7 @@ public class DnsView extends VerticalLayout {
         var places = new TreeSet<String>();
 
         for (var classStart : startList.getClassStart()) {
+            if (StartListLookupService.isIgnoredClass(classStart)) continue;
             String className = classStart.getClazz() != null
                     ? classStart.getClazz().getName() : "";
             String startPlace = "";

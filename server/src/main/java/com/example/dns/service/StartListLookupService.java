@@ -1,5 +1,6 @@
 package com.example.dns.service;
 
+import org.orienteering.datastandard._3.ClassStart;
 import org.orienteering.datastandard._3.StartList;
 import org.springframework.stereotype.Service;
 
@@ -29,6 +30,7 @@ public class StartListLookupService {
         }
         Map<String, ControlCardEntry> map = new LinkedHashMap<>();
         for (var classStart : startList.getClassStart()) {
+            if (isIgnoredClass(classStart)) continue;
             for (var personStart : classStart.getPersonStart()) {
                 for (var raceStart : personStart.getStart()) {
                     int bib = parseBib(raceStart.getBibNumber());
@@ -60,6 +62,7 @@ public class StartListLookupService {
         }
 
         for (var classStart : startList.getClassStart()) {
+            if (isIgnoredClass(classStart)) continue;
             String className = classStart.getClazz() != null
                     ? classStart.getClazz().getName() : "";
             for (var personStart : classStart.getPersonStart()) {
@@ -81,6 +84,7 @@ public class StartListLookupService {
         }
 
         for (var classStart : startList.getClassStart()) {
+            if (isIgnoredClass(classStart)) continue;
             String className = classStart.getClazz() != null
                     ? classStart.getClazz().getName() : "";
             for (var personStart : classStart.getPersonStart()) {
@@ -116,6 +120,16 @@ public class StartListLookupService {
             return null;
         }
         return LocalTime.of(cal.getHour(), cal.getMinute(), cal.getSecond());
+    }
+
+    /**
+     * Returns true if the class should be ignored when processing start lists.
+     * VAKANTIT class contains placeholder entries, not real competitors.
+     */
+    public static boolean isIgnoredClass(ClassStart classStart) {
+        if (classStart.getClazz() == null) return false;
+        String name = classStart.getClazz().getName();
+        return "VAKANTIT".equalsIgnoreCase(name);
     }
 
     private static int parseBib(String bib) {

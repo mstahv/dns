@@ -32,6 +32,8 @@ public class RaspiReader {
         String serialDevice = "";
         String logPath = "/var/log/raspireader/reads.log";
         boolean emitCheck = false;
+        int pwmChip = -1;
+        int pwmChannel = -1;
 
         // Parse command line arguments
         for (int i = 0; i < args.length; i++) {
@@ -41,6 +43,8 @@ public class RaspiReader {
                 case "--serial" -> serialDevice = args[++i];
                 case "--log" -> logPath = args[++i];
                 case "--emitcheck" -> emitCheck = true;
+                case "--pwm-chip" -> pwmChip = Integer.parseInt(args[++i]);
+                case "--pwm-channel" -> pwmChannel = Integer.parseInt(args[++i]);
                 case "--help" -> {
                     printHelp();
                     return;
@@ -91,12 +95,19 @@ public class RaspiReader {
         // Initialize servo gate (hardware PWM via sysfs, independent of Pi4J)
         GateController gate = null;
         try {
-            gate = new GateController();
-            LOG.info("  Servo gate: pwmchip" + GateController.PWM_CHIP
-                    + "/pwm" + GateController.PWM_CHANNEL + " (GPIO 18)");
+            // Auto-detect PWM chip/channel based on Pi model if not specified
+            if (pwmChip < 0 || pwmChannel < 0) {
+                int[] defaults = GateController.detectPwmDefaults();
+                if (pwmChip < 0) pwmChip = defaults[0];
+                if (pwmChannel < 0) pwmChannel = defaults[1];
+            }
+            gate = new GateController(pwmChip, pwmChannel);
+            LOG.info("  Servo gate: pwmchip" + gate.getPwmChip()
+                    + "/pwm" + gate.getPwmChannel() + " (GPIO 18)");
         } catch (Exception e) {
             LOG.warning("Servo gate not available: " + e.getMessage());
             LOG.warning("  Ensure dtoverlay=pwm is set in /boot/firmware/config.txt");
+            LOG.warning("  Try --pwm-chip N --pwm-channel N if auto-detect is wrong");
         }
 
         // Initialize onboard ACT LED
@@ -499,6 +510,9 @@ public class RaspiReader {
                   --log <path>         Log file path (default: /var/log/raspireader/reads.log)
                   --emitcheck          Emit check mode: read-only, no start registration.
                                        Green blink = card found, red blink = not found.
+                  --pwm-chip <n>       PWM chip number for servo (default: auto-detect by Pi model)
+                  --pwm-channel <n>    PWM channel for servo (default: auto-detect by Pi model)
+                                       Pi 5: chip=0 channel=2, older Pis: chip=0 channel=0
                   --help               Show this help
                 """);
     }

@@ -20,14 +20,13 @@ public class GateController {
 
     private static final Logger LOG = Logger.getLogger(GateController.class.getName());
 
-    static final int PWM_CHIP = 0;
-    static final int PWM_CHANNEL = 0;
-
     private static final double CLOSED_ANGLE = 0;
     private static final double OPEN_ANGLE = 90;
     private static final long OPEN_DURATION_MS = 2000;
 
     private final Sg90Servo servo;
+    private final int pwmChip;
+    private final int pwmChannel;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
         Thread t = new Thread(r, "gate-controller");
         t.setDaemon(true);
@@ -37,10 +36,37 @@ public class GateController {
     private ScheduledFuture<?> closeTask;
     private volatile boolean isOpen = false;
 
-    public GateController() throws IOException {
-        this.servo = new Sg90Servo(new PwmChip(PWM_CHIP, PWM_CHANNEL));
+    public GateController(int pwmChip, int pwmChannel) throws IOException {
+        this.pwmChip = pwmChip;
+        this.pwmChannel = pwmChannel;
+        this.servo = new Sg90Servo(new PwmChip(pwmChip, pwmChannel));
         servo.init();
         servo.setAngle(CLOSED_ANGLE);
+    }
+
+    public int getPwmChip() {
+        return pwmChip;
+    }
+
+    public int getPwmChannel() {
+        return pwmChannel;
+    }
+
+    /**
+     * Detects the correct PWM chip and channel for GPIO 18 based on Pi model.
+     * Pi 5 (RP1): pwmchip0/pwm2, older Pis: pwmchip0/pwm0.
+     */
+    static int[] detectPwmDefaults() {
+        try {
+            String model = java.nio.file.Files.readString(
+                    java.nio.file.Path.of("/proc/device-tree/model")).trim();
+            if (model.contains("Pi 5")) {
+                return new int[]{0, 2}; // RP1: GPIO 18 = PWM0_CH2
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+        return new int[]{0, 0}; // BCM2710/BCM2711: GPIO 18 = PWM0_CH0
     }
 
     /** Opens the gate. Schedules auto-close after 2 seconds. */

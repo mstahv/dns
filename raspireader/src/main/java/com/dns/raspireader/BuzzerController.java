@@ -22,7 +22,7 @@ public class BuzzerController {
     private static final int TONE_FREQUENCY_HZ = 2000;
     private static final int SHORT_BEEP_MS = 150;
     private static final int SHORT_BEEP_GAP_MS = 100;
-    private static final int LONG_BEEP_MS = 800;
+    private static final int LONG_BEEP_MS = 1600;
 
     private final DigitalOutput buzzer;
     private final ExecutorService executor = Executors.newSingleThreadExecutor(r -> {

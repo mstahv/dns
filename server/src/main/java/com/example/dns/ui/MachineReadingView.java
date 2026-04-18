@@ -7,6 +7,7 @@ import com.example.dns.domain.Machine;
 import com.example.dns.domain.MachineReading;
 import com.example.dns.domain.MachineReadingRepository;
 import com.example.dns.domain.MachineRepository;
+import com.example.dns.service.ServerLogBuffer;
 import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.button.Button;
@@ -22,6 +23,7 @@ import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
+import com.vaadin.flow.component.tabs.TabSheet;
 import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
@@ -51,6 +53,7 @@ public class MachineReadingView extends VerticalLayout {
     private final CompetitionMachineRepository competitionMachineRepository;
     private final MachineReadingRepository machineReadingRepository;
     private final MachineReadingWebSocketHandler webSocketHandler;
+    private final ServerLogBuffer serverLogBuffer;
 
     private String password;
     private Grid<CompetitionMachine> machineGrid;
@@ -61,11 +64,13 @@ public class MachineReadingView extends VerticalLayout {
                               CompetitionMachineRepository competitionMachineRepository,
                               MachineReadingRepository machineReadingRepository,
                               MachineReadingWebSocketHandler webSocketHandler,
+                              ServerLogBuffer serverLogBuffer,
                               UserSession userSession) {
         this.machineRepository = machineRepository;
         this.competitionMachineRepository = competitionMachineRepository;
         this.machineReadingRepository = machineReadingRepository;
         this.webSocketHandler = webSocketHandler;
+        this.serverLogBuffer = serverLogBuffer;
         setWidthFull();
 
         this.password = userSession.getPassword();
@@ -184,10 +189,11 @@ public class MachineReadingView extends VerticalLayout {
                 var currentUI = e.getSource().getUI().orElse(null);
                 if (currentUI == null) return;
                 setEnabled(false);
-                webSocketHandler.requestLogs(machine).thenAccept(logContent ->
+                webSocketHandler.requestLogs(machine).thenAccept(machineLogContent ->
                     currentUI.access(() -> {
                         setEnabled(true);
-                        new LogDialog(machine, logContent).open();
+                        String serverLogs = serverLogBuffer.getLogsForMachine(machine);
+                        new LogDialog(machine, machineLogContent, serverLogs).open();
                     })
                 );
             });
@@ -195,21 +201,29 @@ public class MachineReadingView extends VerticalLayout {
     }
 
     private static class LogDialog extends Dialog {
-        LogDialog(Machine machine, String logContent) {
+        LogDialog(Machine machine, String machineLogContent, String serverLogContent) {
             setHeaderTitle("Lokit: " + machine.getMachineName());
             setWidth("80vw");
             setHeight("70vh");
 
-            var pre = new Pre(logContent) {{
-                getStyle()
-                        .setOverflow(com.vaadin.flow.dom.Style.Overflow.AUTO)
-                        .setFontSize("var(--lumo-font-size-s)");
-                setWidthFull();
-                setHeight("100%");
-            }};
+            var tabSheet = new TabSheet();
+            tabSheet.setSizeFull();
+            tabSheet.add("Laitteen lokit", createLogPre(machineLogContent));
+            tabSheet.add("Palvelimen lokit", createLogPre(
+                    serverLogContent.isEmpty() ? "(Ei lokitietoja)" : serverLogContent));
 
-            add(pre);
+            add(tabSheet);
             getFooter().add(new Button("Sulje", ev -> close()));
+        }
+
+        private static Pre createLogPre(String content) {
+            var pre = new Pre(content);
+            pre.getStyle()
+                    .setOverflow(com.vaadin.flow.dom.Style.Overflow.AUTO)
+                    .setFontSize("var(--lumo-font-size-s)");
+            pre.setWidthFull();
+            pre.setHeight("100%");
+            return pre;
         }
     }
 

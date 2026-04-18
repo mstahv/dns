@@ -99,6 +99,7 @@ public class MachineReadingView extends VerticalLayout {
 
     private void buildMachineSection() {
         add(new H2("Koneet ja niiden yhdistys tähän kisaan"));
+        add(new Span("Kone-kisa-yhdistykset poistetaan automaattisesti joka yö klo 04:00."));
 
         machineGrid = new Grid<>(CompetitionMachine.class, false);
         machineGrid.addColumn(cm -> cm.getMachine().getMachineId()).setHeader("Kone-ID");

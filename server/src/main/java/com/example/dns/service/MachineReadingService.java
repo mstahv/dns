@@ -11,6 +11,7 @@ import com.example.dns.service.StartListLookupService.ControlCardEntry;
 import com.example.dns.service.StartListLookupService.RunnerInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -159,5 +160,19 @@ public class MachineReadingService {
         }
 
         return results;
+    }
+
+    /**
+     * Removes all competition-machine associations at 04:00 every night.
+     * Prevents stale associations from causing machines to report readings
+     * to previous days' competitions.
+     */
+    @Scheduled(cron = "0 0 4 * * *")
+    public void removeAllCompetitionMachineAssociations() {
+        long count = competitionMachineRepository.count();
+        if (count > 0) {
+            competitionMachineRepository.deleteAll();
+            log.info("Nightly cleanup: removed all {} competition-machine associations", count);
+        }
     }
 }

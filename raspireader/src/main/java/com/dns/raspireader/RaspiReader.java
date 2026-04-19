@@ -358,7 +358,7 @@ public class RaspiReader {
         var sb = new StringBuilder();
         try {
             var process = new ProcessBuilder(
-                    "journalctl", "-u", "raspireader", "-n", "50", "--no-pager", "--plain")
+                    "journalctl", "-u", "raspireader", "-n", "50", "--no-pager")
                     .redirectErrorStream(true)
                     .start();
             // Read with timeout — don't let journalctl hang

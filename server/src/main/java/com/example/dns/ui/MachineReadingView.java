@@ -23,14 +23,15 @@ import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.notification.NotificationVariant;
+import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
+import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.tabs.TabSheet;
 import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
-import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
-import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.router.PageTitle;
 import com.vaadin.flow.router.Route;
 import org.vaadin.firitin.appframework.MenuItem;
+import org.vaadin.firitin.components.button.ActionButton;
 import org.vaadin.firitin.components.button.ConfirmButton;
 import org.vaadin.firitin.components.button.VButton;
 import org.vaadin.firitin.util.BrowserPrompt;
@@ -225,20 +226,14 @@ public class MachineReadingView extends VerticalLayout {
                     .forEach(this::remove);
 
             if (showLoadAllButton) {
-                var loadAllButton = new Button("Lataa koko päivän lokit", VaadinIcon.DOWNLOAD.create(), e -> {
-                    e.getSource().setEnabled(false);
-                    e.getSource().setText("Ladataan...");
-                    var currentUI = getUI().orElse(null);
-                    if (currentUI == null) return;
-                    webSocketHandler.requestFullLogs(machine).thenAccept(fullContent ->
-                        currentUI.access(() -> {
-                            fullLogContent = fullContent;
-                            showLogContent(fullContent, false);
-                            addDownloadAnchor();
-                        })
-                    );
-                });
-                add(loadAllButton);
+                ActionButton<String> fullDayLog = new ActionButton<>("Lataa koko päivän loki"){{
+                    setCompletableFutureAction(() -> webSocketHandler.requestFullLogs(machine));
+                    setPostUiAction(logs -> {
+                        fullLogContent = logs;
+                        showLogContent(fullLogContent, false);
+                    });
+                }};
+                add(fullDayLog);
             }
 
             int separatorIdx = logContent.indexOf(READS_LOG_SEPARATOR);

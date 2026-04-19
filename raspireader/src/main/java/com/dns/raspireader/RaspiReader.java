@@ -145,129 +145,123 @@ public class RaspiReader {
         final LedController ledShutdownRef = led;
         final OnboardLed onboardLedShutdownRef = onboardLed;
 
-        // Find serial port — if not found, stay alive for WebSocket (OTA, logs, shutdown)
-        SerialPort port = findSerialPort(serialDevice);
-        if (port == null) {
-            LOG.warning("No Emit 250 serial port found. Running without card reader (WebSocket only).");
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                LOG.info("Shutting down...");
-                ws.shutdown();
-                if (ledShutdownRef != null) ledShutdownRef.shutdown();
-                if (onboardLedShutdownRef != null) onboardLedShutdownRef.shutdown();
-                if (pi4jRef != null) pi4jRef.shutdown();
-            }));
-            try {
-                Thread.currentThread().join(); // Keep alive
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            return;
-        }
-        LOG.info("  Serial port: " + port.getSystemPortName());
-
-        // Configure and open serial port
-        port.setComPortParameters(BAUD_RATE, DATA_BITS, STOP_BITS, PARITY);
-        port.setComPortTimeouts(SerialPort.TIMEOUT_READ_SEMI_BLOCKING, 1000, 0);
-
-        if (!port.openPort()) {
-            LOG.severe("Failed to open serial port: " + port.getSystemPortName());
-            System.exit(1);
-        }
-        LOG.info("Serial port opened. Waiting for Emit cards...");
-
-        final SerialPort portRef = port;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             LOG.info("Shutting down...");
             ws.shutdown();
-            portRef.closePort();
             if (ledShutdownRef != null) ledShutdownRef.shutdown();
             if (onboardLedShutdownRef != null) onboardLedShutdownRef.shutdown();
             if (pi4jRef != null) pi4jRef.shutdown();
         }));
 
-        // Main read loop
+        // Main loop with serial port reconnection
         byte[] readBuffer = new byte[256];
         int lastCardNumber = -1;
         int previousCardNumber = -1;
         long lastReadTime = 0;
         final long REREAD_TIMEOUT_MS = 10_000;
+        final int MAX_CONSECUTIVE_ERRORS = 5;
+        final String serialDeviceFinal = serialDevice;
 
         while (true) {
-            try {
-                int bytesRead = port.readBytes(readBuffer, readBuffer.length);
-                if (bytesRead <= 0) {
-                    continue;
+            // (Re)connect serial port
+            SerialPort port = findSerialPort(serialDeviceFinal);
+            if (port == null) {
+                LOG.warning("No serial port found, retrying in 10s...");
+                try { Thread.sleep(10_000); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt(); break;
                 }
+                continue;
+            }
+            port.setComPortParameters(BAUD_RATE, DATA_BITS, STOP_BITS, PARITY);
+            port.setComPortTimeouts(SerialPort.TIMEOUT_READ_SEMI_BLOCKING, 1000, 0);
+            if (!port.openPort()) {
+                LOG.warning("Failed to open " + port.getSystemPortName() + ", retrying in 10s...");
+                try { Thread.sleep(10_000); } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt(); break;
+                }
+                continue;
+            }
+            LOG.info("Serial port opened: " + port.getSystemPortName());
 
-                Emit250Protocol.CardReading reading = protocol.feedBytes(readBuffer, 0, bytesRead);
-                if (reading != null) {
-                    int cardNumber = reading.cardNumber();
-                    long now = System.currentTimeMillis();
-
-                    // Same card still on reader — extend LED blinking, skip sending
-                    // unless a different card was read in between or timeout exceeded
-                    if (cardNumber == lastCardNumber) {
-                        boolean differentCardInBetween = previousCardNumber != lastCardNumber && previousCardNumber != -1;
-                        boolean timeoutExceeded = (now - lastReadTime) > REREAD_TIMEOUT_MS;
-                        if (!differentCardInBetween && !timeoutExceeded) {
-                            if (ledRef != null) ledRef.extendBlinking();
-                            continue;
-                        }
+            // Read loop — breaks out on repeated errors to reconnect
+            int consecutiveErrors = 0;
+            while (consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
+                try {
+                    int bytesRead = port.readBytes(readBuffer, readBuffer.length);
+                    if (bytesRead <= 0) {
+                        continue;
                     }
-                    previousCardNumber = lastCardNumber;
-                    lastCardNumber = cardNumber;
-                    lastReadTime = now;
-                    lastDisplayedCard = cardNumber;
+                    consecutiveErrors = 0;
 
-                    LOG.info("Card read: " + cardNumber);
-                    readLogger.logRead(cardNumber);
-                    if (ledRef != null) ledRef.recordActivity();
+                    Emit250Protocol.CardReading reading = protocol.feedBytes(readBuffer, 0, bytesRead);
+                    if (reading != null) {
+                        int cardNumber = reading.cardNumber();
+                        long now = System.currentTimeMillis();
 
-                    if (emitCheckMode) {
-                        // Emitcheck: read-only, just check if card is in startlist
-                        if (ledRef != null) {
-                            var cached = startlistCache.lookup(cardNumber);
-                            if (cached != null) {
-                                ledRef.blinkGreen();
-                            } else {
-                                ledRef.blinkRed();
+                        if (cardNumber == lastCardNumber) {
+                            boolean differentCardInBetween = previousCardNumber != lastCardNumber && previousCardNumber != -1;
+                            boolean timeoutExceeded = (now - lastReadTime) > REREAD_TIMEOUT_MS;
+                            if (!differentCardInBetween && !timeoutExceeded) {
+                                if (ledRef != null) ledRef.extendBlinking();
+                                continue;
                             }
                         }
-                    } else {
-                        // Normal mode: immediate LED feedback from cache, then send to server
-                        if (ledRef != null) {
-                            var cached = startlistCache.lookup(cardNumber);
-                            if (cached != null) {
-                                showFoundLed(ledRef, cached.startTime());
-                            } else {
-                                ledRef.greenOnBlinkRed();
+                        previousCardNumber = lastCardNumber;
+                        lastCardNumber = cardNumber;
+                        lastReadTime = now;
+                        lastDisplayedCard = cardNumber;
+
+                        LOG.info("Card read: " + cardNumber);
+                        readLogger.logRead(cardNumber);
+                        if (ledRef != null) ledRef.recordActivity();
+
+                        if (emitCheckMode) {
+                            if (ledRef != null) {
+                                var cached = startlistCache.lookup(cardNumber);
+                                if (cached != null) {
+                                    ledRef.blinkGreen();
+                                } else {
+                                    ledRef.blinkRed();
+                                }
                             }
-                        }
+                        } else {
+                            if (ledRef != null) {
+                                var cached = startlistCache.lookup(cardNumber);
+                                if (cached != null) {
+                                    showFoundLed(ledRef, cached.startTime());
+                                } else {
+                                    ledRef.greenOnBlinkRed();
+                                }
+                            }
 
-                        // Send via WebSocket (async) — server response may override LED
-                        if (!ws.sendReading(cardNumber)) {
-                            buffer.add(cardNumber);
-                            LOG.info("Buffered card (WS disconnected): " + cardNumber);
-                        }
+                            if (!ws.sendReading(cardNumber)) {
+                                buffer.add(cardNumber);
+                                LOG.info("Buffered card (WS disconnected): " + cardNumber);
+                            }
 
-                        // Flush buffer if connected
-                        if (ws.isConnected() && buffer.hasData()) {
-                            for (int buffered : buffer.snapshot()) {
-                                if (ws.sendReading(buffered)) {
-                                    buffer.removeAll(java.util.List.of(buffered));
+                            if (ws.isConnected() && buffer.hasData()) {
+                                for (int buffered : buffer.snapshot()) {
+                                    if (ws.sendReading(buffered)) {
+                                        buffer.removeAll(java.util.List.of(buffered));
+                                    }
                                 }
                             }
                         }
                     }
+                } catch (Exception e) {
+                    consecutiveErrors++;
+                    LOG.log(Level.WARNING, "Serial port error (" + consecutiveErrors + "/" + MAX_CONSECUTIVE_ERRORS + ")", e);
+                    try { Thread.sleep(1000); } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt(); return;
+                    }
                 }
-            } catch (Exception e) {
-                LOG.log(Level.WARNING, "Error reading serial port", e);
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
+            }
+
+            // Too many errors — close port, will reconnect at top of outer loop
+            LOG.warning("Serial port lost, closing and reconnecting...");
+            try { port.closePort(); } catch (Exception ignored) {}
+            try { Thread.sleep(5000); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt(); break;
             }
         }
     }

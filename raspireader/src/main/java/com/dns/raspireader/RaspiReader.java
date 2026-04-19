@@ -63,14 +63,6 @@ public class RaspiReader {
         LOG.info("  Machine ID: " + machineId);
         LOG.info("  Log file: " + logPath);
 
-        // Find serial port
-        SerialPort port = findSerialPort(serialDevice);
-        if (port == null) {
-            LOG.severe("No Emit 250 serial port found. Use --serial to specify device path.");
-            System.exit(1);
-        }
-        LOG.info("  Serial port: " + port.getSystemPortName());
-
         // Initialize Pi4J for GPIO
         Context pi4j = null;
         LedController led = null;
@@ -148,6 +140,31 @@ public class RaspiReader {
             led.startIdleHeartbeat(ws::isConnected);
         }
 
+        // Register shutdown hook
+        final Context pi4jRef = pi4j;
+        final LedController ledShutdownRef = led;
+        final OnboardLed onboardLedShutdownRef = onboardLed;
+
+        // Find serial port — if not found, stay alive for WebSocket (OTA, logs, shutdown)
+        SerialPort port = findSerialPort(serialDevice);
+        if (port == null) {
+            LOG.warning("No Emit 250 serial port found. Running without card reader (WebSocket only).");
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                LOG.info("Shutting down...");
+                ws.shutdown();
+                if (ledShutdownRef != null) ledShutdownRef.shutdown();
+                if (onboardLedShutdownRef != null) onboardLedShutdownRef.shutdown();
+                if (pi4jRef != null) pi4jRef.shutdown();
+            }));
+            try {
+                Thread.currentThread().join(); // Keep alive
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return;
+        }
+        LOG.info("  Serial port: " + port.getSystemPortName());
+
         // Configure and open serial port
         port.setComPortParameters(BAUD_RATE, DATA_BITS, STOP_BITS, PARITY);
         port.setComPortTimeouts(SerialPort.TIMEOUT_READ_SEMI_BLOCKING, 1000, 0);
@@ -158,11 +175,7 @@ public class RaspiReader {
         }
         LOG.info("Serial port opened. Waiting for Emit cards...");
 
-        // Register shutdown hook
         final SerialPort portRef = port;
-        final Context pi4jRef = pi4j;
-        final LedController ledShutdownRef = led;
-        final OnboardLed onboardLedShutdownRef = onboardLed;
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             LOG.info("Shutting down...");
             ws.shutdown();

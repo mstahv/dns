@@ -4,9 +4,16 @@ import com.fazecast.jSerialComm.SerialPort;
 import com.pi4j.Pi4J;
 import com.pi4j.context.Context;
 
+import java.io.ByteArrayOutputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalTime;
+import java.util.zip.GZIPOutputStream;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -124,7 +131,7 @@ public class RaspiReader {
                 },
                 () -> triggerOtaUpdate(),
                 RaspiReader::triggerShutdown,
-                RaspiReader::collectLogs);
+                () -> uploadLogs(baseUrl, machineId));
 
         ws.connect();
 
@@ -384,6 +391,30 @@ public class RaspiReader {
         }
         LOG.info("Collected logs: " + sb.length() + " chars");
         return sb.toString();
+    }
+
+    private static void uploadLogs(String baseUrl, String machineId) {
+        try {
+            String logs = collectLogs();
+            var baos = new ByteArrayOutputStream();
+            try (var gzip = new GZIPOutputStream(baos)) {
+                gzip.write(logs.getBytes(StandardCharsets.UTF_8));
+            }
+            byte[] compressed = baos.toByteArray();
+            LOG.info("Uploading logs: " + logs.length() + " chars, " + compressed.length + " bytes gzipped");
+
+            var request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + "/api/machine-logs/" + machineId))
+                    .header("Content-Encoding", "gzip")
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(compressed))
+                    .timeout(Duration.ofSeconds(30))
+                    .build();
+            var response = HttpClient.newHttpClient()
+                    .send(request, HttpResponse.BodyHandlers.discarding());
+            LOG.info("Log upload response: " + response.statusCode());
+        } catch (Exception e) {
+            LOG.warning("Failed to upload logs: " + e.getMessage());
+        }
     }
 
     private static void triggerShutdown() {

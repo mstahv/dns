@@ -292,6 +292,18 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
     }
 
     /**
+     * Completes a pending log request (called from HTTP upload endpoint).
+     */
+    public void completeLogRequest(Machine machine, String logContent) {
+        CompletableFuture<String> pending = pendingLogRequests.remove(machine.getId());
+        if (pending != null) {
+            log.info("Completing log request for machine {} via HTTP upload ({} chars)",
+                    machine.getMachineId(), logContent.length());
+            pending.complete(logContent);
+        }
+    }
+
+    /**
      * Sends a shutdown request to the connected machine.
      */
     public void requestShutdown(Machine machine) {

@@ -40,7 +40,7 @@ public class MachineWebSocket {
     private final Consumer<ServerResponse> responseCallback;
     private final Runnable updateCallback;
     private final Runnable shutdownCallback;
-    private final Supplier<String> logsCallback;
+    private final Runnable logsCallback;
     private final HttpClient httpClient;
     private final ScheduledExecutorService reconnectScheduler;
 
@@ -58,7 +58,7 @@ public class MachineWebSocket {
                             Consumer<ServerResponse> responseCallback,
                             Runnable updateCallback,
                             Runnable shutdownCallback,
-                            Supplier<String> logsCallback) {
+                            Runnable logsCallback) {
         this.wsUrl = wsUrl;
         this.machineId = machineId;
         this.version = version;
@@ -254,29 +254,7 @@ public class MachineWebSocket {
         } else if (message.contains("\"type\":\"requestLogs\"")) {
             LOG.info("Log request received from server");
             if (logsCallback != null) {
-                // Run in separate thread to avoid blocking WebSocket listener
-                // (journalctl can be slow on Pi Zero, blocking would kill ping/pong)
-                Thread.ofVirtual().name("log-collector").start(() -> {
-                    try {
-                        String logContent = logsCallback.get();
-                        String escaped = escapeJson(logContent);
-                        String msg = "{\"type\":\"logs\",\"data\":\"" + escaped + "\"}";
-                        LOG.info("Sending logs response: " + msg.length() + " chars");
-                        WebSocket ws = webSocket;
-                        if (ws != null && connected) {
-                            ws.sendText(msg, true)
-                                    .thenRun(() -> LOG.info("Logs response sent successfully"))
-                                    .exceptionally(e2 -> {
-                                        LOG.warning("Logs send failed: " + e2.getMessage());
-                                        return null;
-                                    });
-                        } else {
-                            LOG.warning("Cannot send logs: ws=" + (ws != null) + " connected=" + connected);
-                        }
-                    } catch (Exception e) {
-                        LOG.warning("Failed to collect/send logs: " + e.getMessage());
-                    }
-                });
+                Thread.ofVirtual().name("log-collector").start(logsCallback);
             }
         } else if (message.contains("\"type\":\"requestWifiList\"")) {
             handleWifiListRequest();

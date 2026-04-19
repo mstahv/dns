@@ -6,9 +6,13 @@ import com.example.dns.service.TulospalveluService;
 import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.DetachEvent;
+import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.checkbox.CheckboxGroup;
+import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.grid.GridSortOrder;
 import com.vaadin.flow.component.html.H1;
+import com.vaadin.flow.component.html.Paragraph;
+import com.vaadin.flow.component.html.Span;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.TextField;
@@ -176,6 +180,11 @@ public class TableView extends VerticalLayout {
                     return time + " " + by;
                 })
                 .setHeader("Check-in").setSortable(true);
+        grid.addComponentColumn(r -> {
+            if (r.comment() == null || r.comment().isBlank()) return new Span();
+            return new Button("Näytä kommentti", event ->
+                    new CommentDialog(r.name(), r.comment()).open());
+        }).setHeader("Kommentti");
         grid.addColumn(RunnerRow::club).setHeader("Seura").setSortable(true);
 
         grid.sort(List.of(new GridSortOrder<>(bibCol, com.vaadin.flow.data.provider.SortDirection.ASCENDING)));
@@ -204,10 +213,13 @@ public class TableView extends VerticalLayout {
             var r = allRunners.get(i);
             var entry = entriesByBib.get(r.bib());
             boolean shouldBeStarted = entry != null;
-            if (r.started() != shouldBeStarted) {
+            String newComment = entry != null ? entry.getComment() : null;
+            if (r.started() != shouldBeStarted
+                    || !java.util.Objects.equals(r.comment(), newComment)) {
                 allRunners.set(i, r.withCheckIn(shouldBeStarted,
                         entry != null ? entry.getRegisteredAt() : null,
-                        entry != null ? entry.getRegisteredBy() : null));
+                        entry != null ? entry.getRegisteredBy() : null,
+                        newComment));
                 changed = true;
             }
         }
@@ -276,7 +288,8 @@ public class TableView extends VerticalLayout {
                     runners.add(new RunnerRow(bib, name, className, time, startPlace, club,
                             entry != null,
                             entry != null ? entry.getRegisteredAt() : null,
-                            entry != null ? entry.getRegisteredBy() : null));
+                            entry != null ? entry.getRegisteredBy() : null,
+                            entry != null ? entry.getComment() : null));
                 }
             }
         }
@@ -285,10 +298,20 @@ public class TableView extends VerticalLayout {
 
     record RunnerRow(int bib, String name, String className, LocalTime startTime,
                      String startPlace, String club,
-                     boolean started, LocalDateTime registeredAt, String registeredBy) {
-        RunnerRow withCheckIn(boolean started, LocalDateTime registeredAt, String registeredBy) {
+                     boolean started, LocalDateTime registeredAt, String registeredBy,
+                     String comment) {
+        RunnerRow withCheckIn(boolean started, LocalDateTime registeredAt,
+                              String registeredBy, String comment) {
             return new RunnerRow(bib, name, className, startTime, startPlace, club,
-                    started, registeredAt, registeredBy);
+                    started, registeredAt, registeredBy, comment);
+        }
+    }
+
+    private static class CommentDialog extends Dialog {
+        CommentDialog(String runnerName, String comment) {
+            setHeaderTitle("Kommentti: " + runnerName);
+            add(new Paragraph(comment));
+            getFooter().add(new Button("Sulje", e -> close()));
         }
     }
 

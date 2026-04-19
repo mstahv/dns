@@ -100,6 +100,9 @@ public class RaspiReader {
         final LedController ledRef = led;
         final boolean emitCheckMode = emitCheck;
 
+        final String finalBaseUrl = baseUrl;
+        final String finalMachineId = machineId;
+
         // Derive WebSocket URL from base URL
         String wsUrl = baseUrl.replaceFirst("^http", "ws") + "/ws/machine-reading";
 
@@ -131,7 +134,7 @@ public class RaspiReader {
                 },
                 () -> triggerOtaUpdate(),
                 RaspiReader::triggerShutdown,
-                () -> uploadLogs(baseUrl, machineId));
+                () -> uploadLogs(finalBaseUrl, finalMachineId));
 
         ws.connect();
 

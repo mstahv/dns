@@ -7,7 +7,6 @@ import com.example.dns.domain.Machine;
 import com.example.dns.domain.MachineReading;
 import com.example.dns.domain.MachineReadingRepository;
 import com.example.dns.domain.MachineRepository;
-import com.example.dns.service.ServerLogBuffer;
 import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.button.Button;
@@ -53,7 +52,6 @@ public class MachineReadingView extends VerticalLayout {
     private final CompetitionMachineRepository competitionMachineRepository;
     private final MachineReadingRepository machineReadingRepository;
     private final MachineReadingWebSocketHandler webSocketHandler;
-    private final ServerLogBuffer serverLogBuffer;
 
     private String password;
     private Grid<CompetitionMachine> machineGrid;
@@ -64,13 +62,11 @@ public class MachineReadingView extends VerticalLayout {
                               CompetitionMachineRepository competitionMachineRepository,
                               MachineReadingRepository machineReadingRepository,
                               MachineReadingWebSocketHandler webSocketHandler,
-                              ServerLogBuffer serverLogBuffer,
                               UserSession userSession) {
         this.machineRepository = machineRepository;
         this.competitionMachineRepository = competitionMachineRepository;
         this.machineReadingRepository = machineReadingRepository;
         this.webSocketHandler = webSocketHandler;
-        this.serverLogBuffer = serverLogBuffer;
         setWidthFull();
 
         this.password = userSession.getPassword();
@@ -190,11 +186,10 @@ public class MachineReadingView extends VerticalLayout {
                 var currentUI = e.getSource().getUI().orElse(null);
                 if (currentUI == null) return;
                 setEnabled(false);
-                webSocketHandler.requestLogs(machine).thenAccept(machineLogContent ->
+                webSocketHandler.requestLogs(machine).thenAccept(logContent ->
                     currentUI.access(() -> {
                         setEnabled(true);
-                        String serverLogs = serverLogBuffer.getLogsForMachine(machine);
-                        new LogDialog(machine, machineLogContent, serverLogs).open();
+                        new LogDialog(machine, logContent).open();
                     })
                 );
             });
@@ -202,18 +197,27 @@ public class MachineReadingView extends VerticalLayout {
     }
 
     private static class LogDialog extends Dialog {
-        LogDialog(Machine machine, String machineLogContent, String serverLogContent) {
+        private static final String READS_LOG_SEPARATOR = "--- reads.log";
+
+        LogDialog(Machine machine, String logContent) {
             setHeaderTitle("Lokit: " + machine.getMachineName());
             setWidth("80vw");
             setHeight("70vh");
 
-            var tabSheet = new TabSheet();
-            tabSheet.setSizeFull();
-            tabSheet.add("Laitteen lokit", createLogPre(machineLogContent));
-            tabSheet.add("Palvelimen lokit", createLogPre(
-                    serverLogContent.isEmpty() ? "(Ei lokitietoja)" : serverLogContent));
+            int separatorIdx = logContent.indexOf(READS_LOG_SEPARATOR);
+            if (separatorIdx >= 0) {
+                String serviceLogs = logContent.substring(0, separatorIdx).stripTrailing();
+                String readsLogs = logContent.substring(separatorIdx);
 
-            add(tabSheet);
+                var tabSheet = new TabSheet();
+                tabSheet.setSizeFull();
+                tabSheet.add("Palvelun lokit", createLogPre(serviceLogs));
+                tabSheet.add("Emit-lukemat", createLogPre(readsLogs));
+                add(tabSheet);
+            } else {
+                add(createLogPre(logContent));
+            }
+
             getFooter().add(new Button("Sulje", ev -> close()));
         }
 

@@ -378,11 +378,12 @@ public class RaspiReader {
                     "journalctl", "-u", "raspireader", "--since", "today", "--no-pager")
                     .redirectErrorStream(true)
                     .start();
-            boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            // Read output first — if we wait before reading, the pipe buffer
+            // fills up and journalctl blocks, causing a spurious timeout
             sb.append(new String(process.getInputStream().readAllBytes()));
+            boolean finished = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                sb.append("\n(journalctl timeout)\n");
             }
         } catch (Exception e) {
             sb.append("journalctl error: ").append(e.getMessage()).append("\n");

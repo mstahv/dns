@@ -91,6 +91,14 @@ public class DnsService {
                 .findFirst();
     }
 
+    /**
+     * Returns all DnsEntries for a competition, keyed by competitor number.
+     */
+    public Map<Integer, DnsEntry> getEntries(String password) {
+        return repository.findByPassword(password).stream()
+                .collect(Collectors.toMap(DnsEntry::getCompetitorNumber, e -> e, (a, b) -> a));
+    }
+
     public void addStartedListener(Consumer<StartedEvent> listener) {
         startedListeners.add(listener);
     }

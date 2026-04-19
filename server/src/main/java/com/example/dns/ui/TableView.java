@@ -22,12 +22,16 @@ import org.vaadin.firitin.appframework.MenuItem;
 import org.vaadin.firitin.components.grid.VGrid;
 
 import javax.xml.datatype.XMLGregorianCalendar;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Route("table")
 @MenuItem(title = "Taulukko", order = MenuItem.END - 1)
@@ -165,8 +169,13 @@ public class TableView extends VerticalLayout {
                     return a.startTime().compareTo(b.startTime());
                 });
         grid.addColumn(RunnerRow::startPlace).setHeader("Lähtöpaikka").setSortable(true);
-        grid.addColumn(r -> r.started() ? "Kyllä" : "")
-                .setHeader("Lähtenyt").setSortable(true);
+        grid.addColumn(r -> {
+                    if (!r.started()) return "";
+                    String time = r.registeredAt() != null ? r.registeredAt().format(TIME_FMT) : "";
+                    String by = r.registeredBy() != null ? r.registeredBy() : "";
+                    return time + " " + by;
+                })
+                .setHeader("Check-in").setSortable(true);
         grid.addColumn(RunnerRow::club).setHeader("Seura").setSortable(true);
 
         grid.sort(List.of(new GridSortOrder<>(bibCol, com.vaadin.flow.data.provider.SortDirection.ASCENDING)));
@@ -189,13 +198,16 @@ public class TableView extends VerticalLayout {
     }
 
     private void syncFromSignal() {
-        Set<Integer> startedBibs = dnsService.getStartedBibs(password);
+        Map<Integer, com.example.dns.domain.DnsEntry> entriesByBib = dnsService.getEntries(password);
         boolean changed = false;
         for (int i = 0; i < allRunners.size(); i++) {
             var r = allRunners.get(i);
-            boolean shouldBeStarted = startedBibs.contains(r.bib());
+            var entry = entriesByBib.get(r.bib());
+            boolean shouldBeStarted = entry != null;
             if (r.started() != shouldBeStarted) {
-                allRunners.set(i, r.withStarted(shouldBeStarted));
+                allRunners.set(i, r.withCheckIn(shouldBeStarted,
+                        entry != null ? entry.getRegisteredAt() : null,
+                        entry != null ? entry.getRegisteredBy() : null));
                 changed = true;
             }
         }
@@ -231,7 +243,7 @@ public class TableView extends VerticalLayout {
     }
 
     private List<RunnerRow> parseRunners(StartList startList) {
-        Set<Integer> startedBibs = dnsService.getStartedBibs(password);
+        Map<Integer, com.example.dns.domain.DnsEntry> entriesByBib = dnsService.getEntries(password);
         var runners = new ArrayList<RunnerRow>();
 
         for (var classStart : startList.getClassStart()) {
@@ -260,8 +272,11 @@ public class TableView extends VerticalLayout {
                 for (var raceStart : personStart.getStart()) {
                     int bib = parseBib(raceStart.getBibNumber());
                     LocalTime time = toLocalTime(raceStart.getStartTime());
-                    boolean started = bib > 0 && startedBibs.contains(bib);
-                    runners.add(new RunnerRow(bib, name, className, time, startPlace, club, started));
+                    var entry = bib > 0 ? entriesByBib.get(bib) : null;
+                    runners.add(new RunnerRow(bib, name, className, time, startPlace, club,
+                            entry != null,
+                            entry != null ? entry.getRegisteredAt() : null,
+                            entry != null ? entry.getRegisteredBy() : null));
                 }
             }
         }
@@ -269,9 +284,11 @@ public class TableView extends VerticalLayout {
     }
 
     record RunnerRow(int bib, String name, String className, LocalTime startTime,
-                     String startPlace, String club, boolean started) {
-        RunnerRow withStarted(boolean started) {
-            return new RunnerRow(bib, name, className, startTime, startPlace, club, started);
+                     String startPlace, String club,
+                     boolean started, LocalDateTime registeredAt, String registeredBy) {
+        RunnerRow withCheckIn(boolean started, LocalDateTime registeredAt, String registeredBy) {
+            return new RunnerRow(bib, name, className, startTime, startPlace, club,
+                    started, registeredAt, registeredBy);
         }
     }
 

@@ -523,8 +523,21 @@ public class DnsView extends VerticalLayout {
         startListListener = updatedCompetitionId -> {
             if (updatedCompetitionId.equals(competitionId)) {
                 getUI().ifPresent(ui -> ui.access(() -> {
+                    // Save navigation state before rebuild
+                    LocalTime savedSlotTime = (currentIndex >= 0 && currentIndex < sortedTimes.size())
+                            ? sortedTimes.get(currentIndex) : null;
+
                     Notification.show("Lähtölista päivittynyt, näkymä päivitetään...");
                     setCompetition(password);
+
+                    // Restore position so user's time offset is preserved
+                    if (savedSlotTime != null && !sortedTimes.isEmpty()) {
+                        int idx = findNearestTimeIndex(savedSlotTime);
+                        if (idx >= 0) {
+                            lastAutoTime = sortedTimes.get(idx);
+                            showSlot(idx);
+                        }
+                    }
                 }));
             }
         };

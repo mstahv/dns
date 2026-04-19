@@ -185,56 +185,21 @@ public class MachineReadingView extends VerticalLayout {
         }
     }
 
-    private class LogButton extends VButton {
+    private class LogButton extends ActionButton<String> {
         LogButton(Machine machine) {
-            setIcon(VaadinIcon.FILE_TEXT_O.create());
-            addThemeVariants(ButtonVariant.TERTIARY);
-            setTooltipText("Näytä koneen lokit");
-            addClickListener(e -> {
-                setEnabled(false);
-                webSocketHandler.requestLogs(machine).thenAccept(logContent ->
-                    ui.access(() -> {
-                        setEnabled(true);
-                        new LogDialog(machine, logContent).open();
-                    })
-                );
-            });
+            super("Lokit");
+            setCompletableFutureAction(() -> webSocketHandler.requestLogs(machine));
+            setPostUiAction(logContent -> new LogDialog(machine, logContent).open());
         }
     }
 
-    private class LogDialog extends Dialog {
+    private static class LogDialog extends Dialog {
         private static final String READS_LOG_SEPARATOR = "--- reads.log";
-        private final Machine machine;
-        private String fullLogContent;
 
         LogDialog(Machine machine, String logContent) {
-            this.machine = machine;
             setHeaderTitle("Lokit: " + machine.getMachineName());
             setWidth("80vw");
             setHeight("70vh");
-
-            showLogContent(logContent, true);
-
-            getFooter().add(new Button("Sulje", ev -> close()));
-        }
-
-        private void showLogContent(String logContent, boolean showLoadAllButton) {
-            // Remove previous content (keep footer)
-            getChildren()
-                    .filter(c -> !(c.getElement().equals(getFooter().getElement())))
-                    .toList()
-                    .forEach(this::remove);
-
-            if (showLoadAllButton) {
-                ActionButton<String> fullDayLog = new ActionButton<>("Lataa koko päivän loki"){{
-                    setCompletableFutureAction(() -> webSocketHandler.requestFullLogs(machine));
-                    setPostUiAction(logs -> {
-                        fullLogContent = logs;
-                        showLogContent(fullLogContent, false);
-                    });
-                }};
-                add(fullDayLog);
-            }
 
             int separatorIdx = logContent.indexOf(READS_LOG_SEPARATOR);
             if (separatorIdx >= 0) {
@@ -249,19 +214,18 @@ public class MachineReadingView extends VerticalLayout {
             } else {
                 add(createLogPre(logContent));
             }
-        }
 
-        private void addDownloadAnchor() {
             var downloadAnchor = new Anchor(event -> {
                 event.setFileName(machine.getMachineName() + "-" + LocalDate.now() + ".txt");
                 event.setContentType("text/plain");
                 var writer = new PrintWriter(new OutputStreamWriter(
                         event.getOutputStream(), StandardCharsets.UTF_8));
-                writer.print(fullLogContent);
+                writer.print(logContent);
                 writer.flush();
             }, "");
             downloadAnchor.add(new Button("Tallenna tiedostona", VaadinIcon.DOWNLOAD.create()));
-            getFooter().addComponentAsFirst(downloadAnchor);
+
+            getFooter().add(downloadAnchor, new Button("Sulje", ev -> close()));
         }
 
         private static Pre createLogPre(String content) {

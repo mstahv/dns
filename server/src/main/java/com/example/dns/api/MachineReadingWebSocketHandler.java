@@ -64,7 +64,6 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
     private final Map<String, WebSocketSession> sessionById = new ConcurrentHashMap<>();
     private final Map<String, String> sessionVersions = new ConcurrentHashMap<>();
     private final Map<Long, CompletableFuture<String>> pendingLogRequests = new ConcurrentHashMap<>();
-    private final Map<Long, CompletableFuture<String>> pendingFullLogRequests = new ConcurrentHashMap<>();
     private final Map<Long, CompletableFuture<String>> pendingWifiListRequests = new ConcurrentHashMap<>();
     private final Map<Long, CompletableFuture<String>> pendingWifiAddRequests = new ConcurrentHashMap<>();
 
@@ -148,21 +147,6 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
-        // Full logs response from machine
-        if (node.has("type") && "fullLogs".equals(node.get("type").asText())) {
-            Machine m = sessionMachines.get(session.getId());
-            log.info("Received full logs response from machine {} ({} chars)",
-                    m != null ? m.getMachineId() : "unknown", message.getPayload().length());
-            if (m != null) {
-                String logData = node.has("data") ? node.get("data").asText() : "(tyhjä)";
-                CompletableFuture<String> pending = pendingFullLogRequests.remove(m.getId());
-                if (pending != null) {
-                    pending.complete(logData);
-                }
-            }
-            return;
-        }
-
         // Reading message — must be authenticated
         Machine machine = sessionMachines.get(session.getId());
         if (machine == null) {
@@ -190,10 +174,6 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
             CompletableFuture<String> pending = pendingLogRequests.remove(machine.getId());
             if (pending != null) {
                 pending.complete("(Yhteys katkesi)");
-            }
-            CompletableFuture<String> pendingFull = pendingFullLogRequests.remove(machine.getId());
-            if (pendingFull != null) {
-                pendingFull.complete("(Yhteys katkesi)");
             }
             CompletableFuture<String> pendingWifi = pendingWifiListRequests.remove(machine.getId());
             if (pendingWifi != null) {
@@ -308,18 +288,6 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
                 }
             }
         }
-        return future;
-    }
-
-    /**
-     * Requests full day's logs from the connected machine.
-     * Longer timeout since the full log can be large.
-     */
-    public CompletableFuture<String> requestFullLogs(Machine machine) {
-        CompletableFuture<String> future = new CompletableFuture<>();
-        future.completeOnTimeout("(Aikakatkaisu: konetta ei tavoitettu)", 60, TimeUnit.SECONDS);
-        pendingFullLogRequests.put(machine.getId(), future);
-        sendToMachine(machine, Map.of("type", "requestFullLogs"));
         return future;
     }
 

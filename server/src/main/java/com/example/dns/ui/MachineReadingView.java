@@ -9,6 +9,7 @@ import com.example.dns.domain.MachineReadingRepository;
 import com.example.dns.domain.MachineRepository;
 import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.Component;
+import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.Checkbox;
@@ -56,6 +57,7 @@ public class MachineReadingView extends VerticalLayout {
     private final CompetitionMachineRepository competitionMachineRepository;
     private final MachineReadingRepository machineReadingRepository;
     private final MachineReadingWebSocketHandler webSocketHandler;
+    private final UI ui;
 
     private String password;
     private Grid<CompetitionMachine> machineGrid;
@@ -71,6 +73,7 @@ public class MachineReadingView extends VerticalLayout {
         this.competitionMachineRepository = competitionMachineRepository;
         this.machineReadingRepository = machineReadingRepository;
         this.webSocketHandler = webSocketHandler;
+        this.ui = UI.getCurrent();
         setWidthFull();
 
         this.password = userSession.getPassword();
@@ -187,11 +190,9 @@ public class MachineReadingView extends VerticalLayout {
             addThemeVariants(ButtonVariant.TERTIARY);
             setTooltipText("Näytä koneen lokit");
             addClickListener(e -> {
-                var currentUI = e.getSource().getUI().orElse(null);
-                if (currentUI == null) return;
                 setEnabled(false);
                 webSocketHandler.requestLogs(machine).thenAccept(logContent ->
-                    currentUI.access(() -> {
+                    ui.access(() -> {
                         setEnabled(true);
                         new LogDialog(machine, logContent).open();
                     })

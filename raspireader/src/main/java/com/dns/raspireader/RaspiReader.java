@@ -124,7 +124,8 @@ public class RaspiReader {
                 },
                 () -> triggerOtaUpdate(),
                 RaspiReader::triggerShutdown,
-                RaspiReader::collectLogs);
+                RaspiReader::collectLogs,
+                RaspiReader::collectFullLogs);
 
         ws.connect();
 
@@ -390,6 +391,38 @@ public class RaspiReader {
         }
         LOG.info("Collected logs: " + result.length() + " chars");
         return result;
+    }
+
+    private static String collectFullLogs() {
+        var sb = new StringBuilder();
+        try {
+            var process = new ProcessBuilder(
+                    "journalctl", "-u", "raspireader", "--since", "today", "--no-pager")
+                    .redirectErrorStream(true)
+                    .start();
+            boolean finished = process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS);
+            sb.append(new String(process.getInputStream().readAllBytes()));
+            if (!finished) {
+                process.destroyForcibly();
+                sb.append("\n(journalctl timeout)\n");
+            }
+        } catch (Exception e) {
+            sb.append("journalctl error: ").append(e.getMessage()).append("\n");
+        }
+        try {
+            var readLog = Path.of("/var/log/raspireader/reads.log");
+            if (java.nio.file.Files.exists(readLog)) {
+                var lines = java.nio.file.Files.readAllLines(readLog);
+                sb.append("\n--- reads.log (").append(lines.size()).append(" lines) ---\n");
+                for (String line : lines) {
+                    sb.append(line).append("\n");
+                }
+            }
+        } catch (Exception e) {
+            sb.append("reads.log error: ").append(e.getMessage()).append("\n");
+        }
+        LOG.info("Collected full logs: " + sb.length() + " chars");
+        return sb.toString();
     }
 
     private static void triggerShutdown() {

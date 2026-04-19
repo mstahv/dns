@@ -41,6 +41,7 @@ public class MachineWebSocket {
     private final Runnable updateCallback;
     private final Runnable shutdownCallback;
     private final Supplier<String> logsCallback;
+    private final Supplier<String> fullLogsCallback;
     private final HttpClient httpClient;
     private final ScheduledExecutorService reconnectScheduler;
 
@@ -58,7 +59,8 @@ public class MachineWebSocket {
                             Consumer<ServerResponse> responseCallback,
                             Runnable updateCallback,
                             Runnable shutdownCallback,
-                            Supplier<String> logsCallback) {
+                            Supplier<String> logsCallback,
+                            Supplier<String> fullLogsCallback) {
         this.wsUrl = wsUrl;
         this.machineId = machineId;
         this.version = version;
@@ -67,6 +69,7 @@ public class MachineWebSocket {
         this.updateCallback = updateCallback;
         this.shutdownCallback = shutdownCallback;
         this.logsCallback = logsCallback;
+        this.fullLogsCallback = fullLogsCallback;
         this.httpClient = HttpClient.newHttpClient();
         this.reconnectScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "ws-reconnect");
@@ -275,6 +278,21 @@ public class MachineWebSocket {
                         }
                     } catch (Exception e) {
                         LOG.warning("Failed to collect/send logs: " + e.getMessage());
+                    }
+                });
+            }
+        } else if (message.contains("\"type\":\"requestFullLogs\"")) {
+            LOG.info("Full log request received from server");
+            if (fullLogsCallback != null) {
+                Thread.ofVirtual().name("full-log-collector").start(() -> {
+                    try {
+                        String logContent = fullLogsCallback.get();
+                        String escaped = escapeJson(logContent);
+                        String msg = "{\"type\":\"fullLogs\",\"data\":\"" + escaped + "\"}";
+                        LOG.info("Sending full logs response: " + msg.length() + " chars");
+                        sendResponse(msg);
+                    } catch (Exception e) {
+                        LOG.warning("Failed to collect/send full logs: " + e.getMessage());
                     }
                 });
             }

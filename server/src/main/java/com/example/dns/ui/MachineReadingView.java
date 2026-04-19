@@ -34,6 +34,10 @@ import org.vaadin.firitin.components.button.ConfirmButton;
 import org.vaadin.firitin.components.button.VButton;
 import org.vaadin.firitin.util.BrowserPrompt;
 
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Set;
@@ -196,13 +200,45 @@ public class MachineReadingView extends VerticalLayout {
         }
     }
 
-    private static class LogDialog extends Dialog {
+    private class LogDialog extends Dialog {
         private static final String READS_LOG_SEPARATOR = "--- reads.log";
+        private final Machine machine;
+        private String fullLogContent;
 
         LogDialog(Machine machine, String logContent) {
+            this.machine = machine;
             setHeaderTitle("Lokit: " + machine.getMachineName());
             setWidth("80vw");
             setHeight("70vh");
+
+            showLogContent(logContent, true);
+
+            getFooter().add(new Button("Sulje", ev -> close()));
+        }
+
+        private void showLogContent(String logContent, boolean showLoadAllButton) {
+            // Remove previous content (keep footer)
+            getChildren()
+                    .filter(c -> !(c.getElement().equals(getFooter().getElement())))
+                    .toList()
+                    .forEach(this::remove);
+
+            if (showLoadAllButton) {
+                var loadAllButton = new Button("Lataa koko päivän lokit", VaadinIcon.DOWNLOAD.create(), e -> {
+                    e.getSource().setEnabled(false);
+                    e.getSource().setText("Ladataan...");
+                    var currentUI = getUI().orElse(null);
+                    if (currentUI == null) return;
+                    webSocketHandler.requestFullLogs(machine).thenAccept(fullContent ->
+                        currentUI.access(() -> {
+                            fullLogContent = fullContent;
+                            showLogContent(fullContent, false);
+                            addDownloadAnchor();
+                        })
+                    );
+                });
+                add(loadAllButton);
+            }
 
             int separatorIdx = logContent.indexOf(READS_LOG_SEPARATOR);
             if (separatorIdx >= 0) {
@@ -217,8 +253,19 @@ public class MachineReadingView extends VerticalLayout {
             } else {
                 add(createLogPre(logContent));
             }
+        }
 
-            getFooter().add(new Button("Sulje", ev -> close()));
+        private void addDownloadAnchor() {
+            var downloadAnchor = new Anchor(event -> {
+                event.setFileName(machine.getMachineName() + "-" + LocalDate.now() + ".txt");
+                event.setContentType("text/plain");
+                var writer = new PrintWriter(new OutputStreamWriter(
+                        event.getOutputStream(), StandardCharsets.UTF_8));
+                writer.print(fullLogContent);
+                writer.flush();
+            }, "");
+            downloadAnchor.add(new Button("Tallenna tiedostona", VaadinIcon.DOWNLOAD.create()));
+            getFooter().addComponentAsFirst(downloadAnchor);
         }
 
         private static Pre createLogPre(String content) {

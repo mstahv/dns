@@ -42,6 +42,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -208,11 +209,11 @@ public class MachineReadingView extends VerticalLayout {
 
                 var tabSheet = new TabSheet();
                 tabSheet.setSizeFull();
-                tabSheet.add("Palvelun lokit", createLogPre(serviceLogs));
-                tabSheet.add("Emit-lukemat", createLogPre(readsLogs));
+                tabSheet.add("Palvelun lokit", createLogGrid(serviceLogs));
+                tabSheet.add("Emit-lukemat", createLogGrid(readsLogs));
                 add(tabSheet);
             } else {
-                add(createLogPre(logContent));
+                add(createLogGrid(logContent));
             }
 
             var downloadAnchor = new Anchor(event -> {
@@ -228,14 +229,14 @@ public class MachineReadingView extends VerticalLayout {
             getFooter().add(downloadAnchor, new Button("Sulje", ev -> close()));
         }
 
-        private static Pre createLogPre(String content) {
-            var pre = new Pre(content);
-            pre.getStyle()
-                    .setOverflow(com.vaadin.flow.dom.Style.Overflow.AUTO)
-                    .setFontSize("var(--lumo-font-size-s)");
-            pre.setWidthFull();
-            pre.setHeight("100%");
-            return pre;
+        private static Grid<String> createLogGrid(String content) {
+            List<String> lines = List.of(content.split("\n"));
+            var grid = new Grid<String>();
+            grid.setItems(lines);
+            grid.addColumn(line -> line).setHeader("Loki");
+            grid.setSizeFull();
+            grid.getStyle().setFontSize("var(--lumo-font-size-s)");
+            return grid;
         }
     }
 

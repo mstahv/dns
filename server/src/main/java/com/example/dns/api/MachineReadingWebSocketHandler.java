@@ -269,7 +269,7 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
      */
     public CompletableFuture<String> requestLogs(Machine machine) {
         CompletableFuture<String> future = new CompletableFuture<>();
-        future.completeOnTimeout("(Aikakatkaisu: konetta ei tavoitettu)", 30, TimeUnit.SECONDS);
+        future.completeOnTimeout("(Aikakatkaisu: konetta ei tavoitettu)", 120, TimeUnit.SECONDS);
         pendingLogRequests.put(machine.getId(), future);
 
         for (var entry : sessionMachines.entrySet()) {

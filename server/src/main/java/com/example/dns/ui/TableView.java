@@ -10,9 +10,11 @@ import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.checkbox.CheckboxGroup;
 import com.vaadin.flow.component.dialog.Dialog;
 import com.vaadin.flow.component.grid.GridSortOrder;
+import com.vaadin.flow.component.html.Anchor;
 import com.vaadin.flow.component.html.H1;
 import com.vaadin.flow.component.html.Paragraph;
 import com.vaadin.flow.component.html.Span;
+import com.vaadin.flow.component.icon.VaadinIcon;
 import com.vaadin.flow.component.orderedlayout.HorizontalLayout;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.textfield.TextField;
@@ -26,6 +28,10 @@ import org.vaadin.firitin.appframework.MenuItem;
 import org.vaadin.firitin.components.grid.VGrid;
 
 import javax.xml.datatype.XMLGregorianCalendar;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -131,7 +137,17 @@ public class TableView extends VerticalLayout {
             applyFilters();
         });
 
-        var filterRow = new HorizontalLayout(nameField, numberField, startedFilter);
+        var csvAnchor = new Anchor(event -> {
+            event.setFileName("dns-" + competitionId + ".csv");
+            event.setContentType("text/csv");
+            var out = event.getOutputStream();
+            // UTF-8 BOM for Excel compatibility
+            out.write(new byte[]{(byte) 0xEF, (byte) 0xBB, (byte) 0xBF});
+            writeCsv(out);
+        }, "");
+        csvAnchor.add(new Button("Lataa CSV", VaadinIcon.DOWNLOAD.create()));
+
+        var filterRow = new HorizontalLayout(nameField, numberField, startedFilter, csvAnchor);
         filterRow.setAlignItems(Alignment.END);
 
         if (!allStartPlaces.isEmpty()) {
@@ -162,10 +178,10 @@ public class TableView extends VerticalLayout {
             }
         });
 
-        var bibCol = grid.addColumn(RunnerRow::bib).setHeader("Nro").setSortable(true);
+        grid.addColumn(RunnerRow::bib).setHeader("Nro").setSortable(true);
         grid.addColumn(RunnerRow::name).setHeader("Nimi").setSortable(true);
         grid.addColumn(RunnerRow::className).setHeader("Sarja").setSortable(true);
-        grid.addColumn(r -> r.startTime() != null ? r.startTime().format(TIME_FMT) : "")
+        var timeCol = grid.addColumn(r -> r.startTime() != null ? r.startTime().format(TIME_FMT) : "")
                 .setHeader("Lähtöaika").setSortable(true)
                 .setComparator((a, b) -> {
                     if (a.startTime() == null) return 1;
@@ -187,7 +203,7 @@ public class TableView extends VerticalLayout {
         }).setHeader("Kommentti");
         grid.addColumn(RunnerRow::club).setHeader("Seura").setSortable(true);
 
-        grid.sort(List.of(new GridSortOrder<>(bibCol, com.vaadin.flow.data.provider.SortDirection.ASCENDING)));
+        grid.sort(List.of(new GridSortOrder<>(timeCol, com.vaadin.flow.data.provider.SortDirection.ASCENDING)));
         grid.setSizeFull();
         addAndExpand(grid);
     }
@@ -305,6 +321,38 @@ public class TableView extends VerticalLayout {
             return new RunnerRow(bib, name, className, startTime, startPlace, club,
                     started, registeredAt, registeredBy, comment);
         }
+    }
+
+    private void writeCsv(java.io.OutputStream outputStream) throws IOException {
+        var writer = new PrintWriter(new OutputStreamWriter(outputStream, StandardCharsets.UTF_8));
+        writer.println("Nro;Nimi;Sarja;Lähtöaika;Lähtöpaikka;Check-in;Seura;Kommentti");
+        allRunners.stream()
+                .filter(this::matchesRunner)
+                .forEach(r -> {
+                    writer.print(r.bib()); writer.print(';');
+                    writer.print(escapeCsv(r.name())); writer.print(';');
+                    writer.print(escapeCsv(r.className())); writer.print(';');
+                    writer.print(r.startTime() != null ? r.startTime().format(TIME_FMT) : ""); writer.print(';');
+                    writer.print(escapeCsv(r.startPlace())); writer.print(';');
+                    if (r.started()) {
+                        String time = r.registeredAt() != null ? r.registeredAt().format(TIME_FMT) : "";
+                        String by = r.registeredBy() != null ? r.registeredBy() : "";
+                        writer.print(time + " " + by);
+                    }
+                    writer.print(';');
+                    writer.print(escapeCsv(r.club())); writer.print(';');
+                    writer.print(escapeCsv(r.comment() != null ? r.comment() : ""));
+                    writer.println();
+                });
+        writer.flush();
+    }
+
+    private static String escapeCsv(String value) {
+        if (value == null) return "";
+        if (value.contains(";") || value.contains("\"") || value.contains("\n")) {
+            return "\"" + value.replace("\"", "\"\"") + "\"";
+        }
+        return value;
     }
 
     private static class CommentDialog extends Dialog {

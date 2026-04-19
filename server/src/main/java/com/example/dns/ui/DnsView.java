@@ -71,9 +71,10 @@ public class DnsView extends VerticalLayout {
     private VerticalLayout slotContainer;
     private CssGrid runnersGrid;
     private Button autoButton;
+    private static final long DEFAULT_OFFSET_MINUTES = 4; // show runners with ~4 min to start
     private boolean autoMode = true;
     private LocalTime lastAutoTime;
-    private long autoOffsetMinutes; // offset from real time, e.g. +4 if user scrolled 4 min ahead
+    private long autoOffsetMinutes = DEFAULT_OFFSET_MINUTES;
 
     // Filters
     private String nameFilter = "";
@@ -121,8 +122,8 @@ public class DnsView extends VerticalLayout {
         slotContainer.setWidthFull();
         addAndExpand(slotContainer);
 
-        // Navigate to next upcoming start time
-        int next = findNextUpcomingTimeIndex(LocalTime.now());
+        // Navigate to start time ~4 min ahead (staff monitors this view)
+        int next = findNextUpcomingTimeIndex(LocalTime.now().plusMinutes(autoOffsetMinutes));
         if (next >= 0) {
             lastAutoTime = sortedTimes.get(next);
             showSlot(next);
@@ -233,9 +234,9 @@ public class DnsView extends VerticalLayout {
 
         var nowButton = new Button("Nyt", VaadinIcon.CLOCK.create(), e -> {
             autoMode = false;
-            autoOffsetMinutes = 0;
+            autoOffsetMinutes = DEFAULT_OFFSET_MINUTES;
             updateAutoButton();
-            int next = findNextUpcomingTimeIndex(LocalTime.now());
+            int next = findNextUpcomingTimeIndex(LocalTime.now().plusMinutes(DEFAULT_OFFSET_MINUTES));
             if (next >= 0) showSlot(next);
             timeButton.close();
         });

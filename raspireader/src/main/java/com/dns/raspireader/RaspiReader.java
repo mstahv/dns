@@ -188,7 +188,22 @@ public class RaspiReader {
             while (consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
                 try {
                     int bytesRead = port.readBytes(readBuffer, readBuffer.length);
-                    if (bytesRead <= 0) {
+                    // bytesRead == 0  → timeout, no data (normal)
+                    // bytesRead  < 0  → read error, e.g. USB unplugged: fd is gone and
+                    //                   the call returns -1 immediately (no blocking),
+                    //                   so we must count it as an error to break out
+                    //                   and let the outer loop rescan device nodes.
+                    if (bytesRead < 0 || !port.isOpen()) {
+                        consecutiveErrors++;
+                        LOG.warning("Serial read failed (" + consecutiveErrors + "/"
+                                + MAX_CONSECUTIVE_ERRORS + "), errno="
+                                + port.getLastErrorCode());
+                        try { Thread.sleep(500); } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt(); return;
+                        }
+                        continue;
+                    }
+                    if (bytesRead == 0) {
                         continue;
                     }
                     consecutiveErrors = 0;

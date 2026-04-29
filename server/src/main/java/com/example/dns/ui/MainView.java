@@ -8,6 +8,7 @@ import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.combobox.ComboBox;
 import com.vaadin.flow.component.html.H1;
+import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.page.WebStorage;
@@ -17,6 +18,7 @@ import com.vaadin.flow.router.BeforeEnterEvent;
 import com.vaadin.flow.router.BeforeEnterObserver;
 import com.vaadin.flow.router.Route;
 import org.vaadin.firitin.appframework.MenuItem;
+import org.vaadin.firitin.components.button.DefaultButton;
 
 @Route(value = "", autoLayout = false)
 @MenuItem(title = "Kisan valinta", order = MenuItem.END, hidden = true)
@@ -37,7 +39,6 @@ public class MainView extends VerticalLayout {
 
         nameField.setPlaceholder("Nimi...");
         nameField.setWidthFull();
-
         WebStorage.getItem(LS_USER_NAME, value -> {
             if (value != null && !value.isBlank()) {
                 nameField.setValue(value);
@@ -45,6 +46,8 @@ public class MainView extends VerticalLayout {
         });
 
         add(nameField);
+
+        add(new H2("Kirjaudu olemassa olevaan kilpailuun"));
 
         var passwordField = new PasswordField("Kisasalasana");
         WebStorage.getItem(LS_PASSWORD, value -> {
@@ -55,7 +58,7 @@ public class MainView extends VerticalLayout {
 
         add(new LoginPanel(competitionRepository, passwordField));
 
-        add(new H1("Luo uusi kilpailu"));
+        add(new H2("Luo uusi kilpailu"));
 
         add(new CreateCompetitionPanel(competitionRepository, tulospalveluService));
     }
@@ -73,7 +76,7 @@ public class MainView extends VerticalLayout {
     private class LoginPanel extends VerticalLayout {
 
         LoginPanel(CompetitionRepository repo, PasswordField passwordField) {
-            var loginButton = new Button("Kirjaudu kisaan", e -> {
+            var loginButton = new DefaultButton("Kirjaudu kisaan", e -> {
                 if (nameField.getValue().isBlank()) {
                     Notification.show("Syötä nimesi");
                     return;

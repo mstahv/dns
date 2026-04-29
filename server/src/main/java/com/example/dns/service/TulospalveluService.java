@@ -70,13 +70,14 @@ public class TulospalveluService {
                     .GET()
                     .build();
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            Map<String, Object> root = objectMapper.readValue(response.body(), Map.class);
+            String body = response.body();
+            Map<String, Object> root = objectMapper.readValue(body, Map.class);
             List<Map<String, Object>> data = (List<Map<String, Object>>) root.get("data");
 
             eventsCache = data.stream()
                     .map(CompetitionInfo::fromJson)
                     .filter(c -> "Orienteering".equals(c.discipline()))
-                    .filter(c -> c.startListUrl() != null)
+//                    .filter(c -> c.startListUrl() != null)
                     .toList();
             eventsCacheTime = Instant.now();
             return eventsCache;
@@ -232,11 +233,20 @@ public class TulospalveluService {
                 .filter(c -> c.eventId().equals(competitionId))
                 .findFirst()
                 .orElse(null);
-        if (competition == null || competition.startListUrl() == null) {
+
+        if (competition == null) {
             return null;
         }
 
-        String url = BASE_URL + competition.startListUrl();
+        String url;
+        if(competition.startListUrl() == null) {
+            // https://online.tulospalvelu.fi/tulokset-new/xml/startlist_2026_viking_1_iof.xml
+            url = BASE_URL + "/tulokset-new/xml/startlist_" + competition.eventId() + "_1_iof.xml";
+
+        } else {
+            url = BASE_URL + competition.startListUrl();
+        }
+
         try {
             log.info("Downloading start list from {}", url);
             HttpRequest request = HttpRequest.newBuilder()

@@ -55,6 +55,14 @@ public class MachineReadingService {
     }
 
     /**
+     * Identifier for the synthetic Machine that represents browser-based
+     * (WebSerial) card readings. A single shared Machine is used for all
+     * such readings; the registering user is captured separately on the
+     * resulting DnsEntry.
+     */
+    private static final String BROWSER_MACHINE_ID = "browser-webserial";
+
+    /**
      * Finds or creates a global Machine by its device identifier.
      */
     public Machine resolveOrCreateMachine(String machineId) {
@@ -160,6 +168,62 @@ public class MachineReadingService {
         }
 
         return results;
+    }
+
+    /**
+     * Processes a card reading that originates from the browser via WebSerial.
+     * Mirrors the reporting behaviour of {@link #processReading} (saves a
+     * MachineReading row regardless of outcome) but bypasses the
+     * Machine/CompetitionMachine approval flow, since browser readings are
+     * authenticated via the user's Vaadin session against a single competition.
+     */
+    public ReadingResult processBrowserReading(String password, int controlCard, String userName) {
+        String cc = String.valueOf(controlCard);
+        var competition = competitionRepository.findById(password).orElse(null);
+        if (competition == null || !competition.isEnabled()) {
+            log.info("Browser reading ignored, competition not found or disabled (password={}, cc={})",
+                    password, cc);
+            return new ReadingResult(0, "", "", "", false);
+        }
+
+        Machine machine = machineRepository.findByMachineId(BROWSER_MACHINE_ID)
+                .orElseGet(() -> {
+                    var m = new Machine();
+                    m.setMachineId(BROWSER_MACHINE_ID);
+                    m.setMachineName("Selainluku (WebSerial)");
+                    return machineRepository.save(m);
+                });
+
+        Optional<RunnerInfo> runnerOpt = startListLookupService.findByControlCard(
+                competition.getCompetitionId(), cc);
+
+        var reading = new MachineReading();
+        reading.setPassword(password);
+        reading.setMachine(machine);
+        reading.setBib(runnerOpt.map(RunnerInfo::bibNumber).orElse(null));
+        reading.setCc(cc);
+        reading.setReadAt(java.time.Instant.now());
+        reading.setFound(runnerOpt.isPresent());
+        machineReadingRepository.save(reading);
+
+        if (runnerOpt.isPresent()) {
+            RunnerInfo runner = runnerOpt.get();
+            if (!dnsService.isStarted(password, runner.bibNumber())) {
+                dnsService.markStarted(password, runner.bibNumber(), userName);
+            }
+            log.info("Browser reading: {} (bib={}, user={})",
+                    runner.name(), runner.bibNumber(), userName);
+            LocalTime startTime = runner.startTime();
+            return new ReadingResult(
+                    runner.bibNumber(),
+                    startTime != null ? startTime.toString() : "",
+                    runner.name(),
+                    runner.className(),
+                    true);
+        }
+
+        log.info("Browser reading: runner not found (cc={}, user={})", cc, userName);
+        return new ReadingResult(0, "", "", "", false);
     }
 
     /**

@@ -2,13 +2,14 @@ package com.example.dns.ui;
 
 import com.example.dns.domain.CompetitionRepository;
 import com.example.dns.service.DnsService;
+import com.example.dns.service.MachineReadingService;
+import com.example.dns.service.MachineReadingService.ReadingResult;
 import com.example.dns.service.StartListLookupService;
 import com.example.dns.service.TulospalveluService;
 import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.AttachEvent;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.DetachEvent;
-import com.vaadin.flow.component.UI;
 import com.vaadin.flow.component.button.Button;
 import com.vaadin.flow.component.button.ButtonVariant;
 import com.vaadin.flow.component.checkbox.CheckboxGroup;
@@ -23,6 +24,7 @@ import com.vaadin.flow.data.value.ValueChangeMode;
 import com.vaadin.flow.dom.ElementEffect;
 import com.vaadin.flow.router.Route;
 import com.vaadin.flow.signals.shared.SharedNumberSignal;
+import in.virit.emit.Emit250ReaderButton;
 import org.orienteering.datastandard._3.PersonStart;
 import org.orienteering.datastandard._3.StartList;
 import org.vaadin.firitin.appframework.MenuItem;
@@ -30,6 +32,7 @@ import org.vaadin.firitin.components.button.VButton;
 import org.vaadin.firitin.components.cssgrid.CssGrid;
 import org.vaadin.firitin.components.popover.PopoverButton;
 import org.vaadin.firitin.layouts.HorizontalFloatLayout;
+import org.vaadin.firitin.util.WebAudio;
 
 import javax.xml.datatype.XMLGregorianCalendar;
 import java.time.LocalDateTime;
@@ -42,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.LongSupplier;
 
 @Route(value = "dns")
 @MenuItem(title = "DNS", order = 0, icon = VaadinIcon.CLOCK)
@@ -52,6 +56,7 @@ public class DnsView extends VerticalLayout {
     private final CompetitionRepository competitionRepository;
     private final TulospalveluService tulospalveluService;
     private final DnsService dnsService;
+    private final MachineReadingService machineReadingService;
     private final UserSession userSession;
 
     private String password;
@@ -84,12 +89,22 @@ public class DnsView extends VerticalLayout {
     private Set<String> selectedStartPlaces = Set.of();
     private PopoverButton searchButton;
 
+    // WebSerial card-reading debounce: ignore repeated reads of the same
+    // card unless 5 s passes between readings. The reader hardware can
+    // re-emit the same card several times in a row.
+    static final long CARD_READ_DEBOUNCE_MS = 5_000;
+    private int lastReadCard = Integer.MIN_VALUE;
+    private long lastReadAt = 0;
+    private LongSupplier clock = System::currentTimeMillis;
+
     public DnsView(CompetitionRepository competitionRepository,
                    TulospalveluService tulospalveluService, DnsService dnsService,
+                   MachineReadingService machineReadingService,
                    UserSession userSession) {
         this.competitionRepository = competitionRepository;
         this.tulospalveluService = tulospalveluService;
         this.dnsService = dnsService;
+        this.machineReadingService = machineReadingService;
         this.userSession = userSession;
         setSizeFull();
         getStyle().set("--vaadin-card-title-font-size", "var(--aura-font-size-xl)");
@@ -429,6 +444,99 @@ public class DnsView extends VerticalLayout {
         return true;
     }
 
+    /**
+     * Handles a card read from the WebSerial Emit reader. Looks up the
+     * competitor by control card number, marks them as started, and shows an
+     * alert dialog when the runner does not belong to the slot currently
+     * displayed (early/late) or when the card is unknown. Unknown cards are
+     * also reported to the backend, mirroring the API-based machine flow.
+     *
+     * The reader can re-emit the same card a number of times in a row; an
+     * identical card number is ignored until either a different card is read
+     * or {@link #CARD_READ_DEBOUNCE_MS} has elapsed without any reading.
+     */
+    void handleCardReading(int controlCard) {
+        long now = clock.getAsLong();
+        if (controlCard == lastReadCard && (now - lastReadAt) < CARD_READ_DEBOUNCE_MS) {
+            // Same card seen again within the debounce window: keep the
+            // window measured from this latest reading and bail out.
+            lastReadAt = now;
+            return;
+        }
+        lastReadCard = controlCard;
+        lastReadAt = now;
+
+        ReadingResult result = machineReadingService.processBrowserReading(
+                password, controlCard, userSession.getName());
+
+        if (!result.found()) {
+            new CardAlertDialog(
+                    "Tuntematon kortti",
+                    "Emit-numero " + controlCard + " ei löytynyt lähtölistalta. "
+                            + "Lukutapahtuma kirjattu palvelimelle.").open();
+            return;
+        }
+
+        RunnerCard runnerCard = cardsByBib.get(result.bib());
+        if (runnerCard != null) {
+            runnerCard.setStarted(true);
+            WebAudio.get().playOkBeep();
+            return;
+        }
+
+        String runnerStartTime = result.startTime() == null || result.startTime().isBlank()
+                ? "?" : shortenTime(result.startTime());
+        String currentSlot = currentIndex >= 0 && currentIndex < sortedTimes.size()
+                ? sortedTimes.get(currentIndex).format(TIME_FORMAT) : "?";
+        String relation = describeRelativeTiming(result.startTime());
+
+        new CardAlertDialog(
+                "Eri lähtöajalla: " + result.name(),
+                result.name() + " (nro " + result.bib() + ", lähtöaika " + runnerStartTime + ") "
+                        + relation + " näkyvään lähtöaikaan " + currentSlot
+                        + ". Merkintä on tehty.").open();
+    }
+
+    private String describeRelativeTiming(String runnerStartTimeStr) {
+        if (runnerStartTimeStr == null || runnerStartTimeStr.isBlank()
+                || currentIndex < 0 || currentIndex >= sortedTimes.size()) {
+            return "ei kuulu nykyiseen lähtöaikaan";
+        }
+        try {
+            LocalTime runnerTime = LocalTime.parse(shortenTime(runnerStartTimeStr));
+            LocalTime currentTime = sortedTimes.get(currentIndex);
+            if (runnerTime.isBefore(currentTime)) return "on liian aikaisin";
+            if (runnerTime.isAfter(currentTime)) return "on liian myöhässä";
+            return "kuuluu nykyiseen lähtöaikaan";
+        } catch (Exception e) {
+            return "ei kuulu nykyiseen lähtöaikaan";
+        }
+    }
+
+    private static String shortenTime(String hhmmss) {
+        return hhmmss.length() >= 5 ? hhmmss.substring(0, 5) : hhmmss;
+    }
+
+    /**
+     * Test hook: override the clock used by the card-reading debounce.
+     */
+    void setClock(LongSupplier clock) {
+        this.clock = clock;
+    }
+
+    /**
+     * Modal alert dialog that the user must dismiss with a single button.
+     */
+    private static class CardAlertDialog extends ConfirmDialog {
+        CardAlertDialog(String header, String message) {
+            setHeader(header);
+            setText(message);
+            setConfirmText("OK");
+            setCancelable(false);
+            WebAudio.get().playAlarm();
+        }
+    }
+
     void onCardClicked(RunnerCard card) {
         boolean serverStarted = dnsService.isStarted(password, card.getBibNumber());
 
@@ -543,6 +651,14 @@ public class DnsView extends VerticalLayout {
             }
         };
         tulospalveluService.addStartListUpdateListener(startListListener);
+
+
+        Emit250ReaderButton emit250ReaderButton = new Emit250ReaderButton(() -> {
+            Notification.show("Lukija valmis");
+        }, card -> handleCardReading(card.ecardNumber()));
+        emit250ReaderButton.getContent().setText("");
+        emit250ReaderButton.getContent().setIcon(VaadinIcon.AUTOMATION.create());
+        findAncestor(TopLayout.class).addNavbarHelper(emit250ReaderButton);
     }
 
     @Override

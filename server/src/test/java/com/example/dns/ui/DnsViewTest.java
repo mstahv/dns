@@ -3,7 +3,10 @@ package com.example.dns.ui;
 import com.example.dns.TestcontainersConfiguration;
 import com.example.dns.domain.CompetitionRepository;
 import com.example.dns.domain.DnsEntryRepository;
+import com.example.dns.domain.MachineReading;
+import com.example.dns.domain.MachineReadingRepository;
 import com.example.dns.service.DnsService;
+import com.example.dns.service.TulospalveluService;
 import com.example.dns.service.UserSession;
 import com.vaadin.browserless.VaadinTestApplicationContext;
 import com.vaadin.browserless.VaadinTestUiContext;
@@ -19,6 +22,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -41,11 +45,18 @@ class DnsViewTest {
     @Autowired
     DnsEntryRepository dnsEntryRepository;
 
+    @Autowired
+    MachineReadingRepository machineReadingRepository;
+
+    @Autowired
+    TulospalveluService tulospalveluService;
+
     VaadinTestApplicationContext app;
     VaadinTestUiContext ui;
 
     @BeforeEach
     void setUp() {
+        machineReadingRepository.deleteAll();
         dnsEntryRepository.deleteAll();
         dnsService.clearCache();
         var routes = new Routes().autoDiscoverViews(MainView.class.getPackageName());
@@ -261,5 +272,153 @@ class DnsViewTest {
 
         assertTrue(card2.isStarted(),
                 "Uuden käyttäjän pitäisi nähdä aiemmin merkitty juoksija lähteneenä");
+    }
+
+    // --- WebSerial Emit-kortinluku ---
+
+    /**
+     * Etsii lähtölistasta kontrollikortin numeron juoksijalle, joka kuuluu
+     * annettuun bib-numeroon.
+     */
+    private Optional<Integer> findControlCardForBib(int bib) {
+        var startList = tulospalveluService.getStartList(COMPETITION_ID);
+        if (startList == null) return Optional.empty();
+        for (var cs : startList.getClassStart()) {
+            for (var ps : cs.getPersonStart()) {
+                for (var rs : ps.getStart()) {
+                    int parsed = rs.getBibNumber() != null && !rs.getBibNumber().isBlank()
+                            ? Integer.parseInt(rs.getBibNumber().trim()) : 0;
+                    if (parsed == bib && rs.getControlCard() != null) {
+                        for (var cc : rs.getControlCard()) {
+                            if (cc.getValue() != null && !cc.getValue().isBlank()) {
+                                try {
+                                    return Optional.of(Integer.parseInt(cc.getValue().trim()));
+                                } catch (NumberFormatException ignored) {}
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    @Test
+    void tunnetunKortinLukuMerkitseeNykyisenLahtoajanJuoksijanLahteneeksi() {
+        DnsView view = navigateToDns();
+
+        RunnerCard card = view.getCardsByBib().values().iterator().next();
+        int bib = card.getBibNumber();
+        Optional<Integer> ccOpt = findControlCardForBib(bib);
+        if (ccOpt.isEmpty()) return; // Skip jos testidatassa ei ole kontrollikorttia
+
+        assertFalse(card.isStarted());
+
+        view.handleCardReading(ccOpt.get());
+
+        assertTrue(card.isStarted(),
+                "Nykyisen lähtöajan juoksijan pitäisi merkitä lähteneeksi ilman dialogia");
+        assertTrue(dnsService.isStarted(PASSWORD, bib));
+
+        // Nykyisellä lähtöajalla olevasta kortista ei näytetä dialogia
+        assertTrue(ui.get(ConfirmDialog.class).all().isEmpty(),
+                "Nykyiselle lähtöajalle kuuluvasta kortista ei pidä näyttää dialogia");
+
+        // Lukutapahtuma kirjattu palvelimelle
+        List<MachineReading> readings = machineReadingRepository.findTop100ByPasswordOrderByReadAtDesc(PASSWORD);
+        assertFalse(readings.isEmpty(), "Lukutapahtuma pitäisi tallentua kantaan");
+        assertTrue(readings.getFirst().isFound());
+        assertEquals(bib, readings.getFirst().getBib());
+    }
+
+    @Test
+    void tuntemattomanKortinLukuNayttaaDialoginJaKirjautuuPalvelimelle() {
+        DnsView view = navigateToDns();
+
+        int unknownCc = 999_999;
+        view.handleCardReading(unknownCc);
+
+        List<ConfirmDialog> dialogs = ui.get(ConfirmDialog.class).all();
+        assertFalse(dialogs.isEmpty(), "Tuntemattomalle kortille pitäisi avautua dialogi");
+
+        // Lukutapahtuma kirjattu palvelimelle löytymättömänä (kuten API:n kautta)
+        List<MachineReading> readings = machineReadingRepository.findByPasswordAndFoundFalseOrderByReadAtDesc(PASSWORD);
+        assertFalse(readings.isEmpty(), "Tuntematon luku pitäisi tallentaa palvelimelle");
+        assertEquals(String.valueOf(unknownCc), readings.getFirst().getCc());
+        assertFalse(readings.getFirst().isFound());
+    }
+
+    @Test
+    void samanKortinPerakkainenLukuJatetaanHuomiotta() {
+        DnsView view = navigateToDns();
+        long[] now = {1_000_000};
+        view.setClock(() -> now[0]);
+
+        int unknownCc = 888_888;
+
+        view.handleCardReading(unknownCc);
+        long firstReadingCount = machineReadingRepository.count();
+        int firstDialogCount = ui.get(ConfirmDialog.class).all().size();
+
+        // 1 sekunnin päästä — saman kortin pitäisi jäädä huomiotta
+        now[0] += 1_000;
+        view.handleCardReading(unknownCc);
+        assertEquals(firstReadingCount, machineReadingRepository.count(),
+                "Saman kortin perakkäisestä luvusta ei saa syntyä uutta backend-kirjausta");
+        assertEquals(firstDialogCount, ui.get(ConfirmDialog.class).all().size(),
+                "Saman kortin perakkäisestä luvusta ei saa avautua uutta dialogia");
+
+        // 5 sekunnin tauon jälkeen sama kortti pitää käsitellä uudelleen
+        now[0] += DnsView.CARD_READ_DEBOUNCE_MS + 1;
+        view.handleCardReading(unknownCc);
+        assertEquals(firstReadingCount + 1, machineReadingRepository.count(),
+                "5 sekunnin tauon jälkeen saman kortin luku pitää käsitellä uudelleen");
+
+        // Eri kortti rikkoo debounce-ikkunan välittömästi
+        now[0] += 100;
+        view.handleCardReading(777_777);
+        assertEquals(firstReadingCount + 2, machineReadingRepository.count(),
+                "Eri kortin luku käsitellään välittömästi");
+    }
+
+    @Test
+    void eriLahtoajanKortinLukuNayttaaDialoginMuttaMerkitseeLahteneeksi() {
+        DnsView view = navigateToDns();
+
+        // Etsi juoksija, joka EI ole nykyisessä lähtöajassa
+        int currentBib = view.getCardsByBib().keySet().iterator().next();
+        var currentCard = view.getCardsByBib().get(currentBib);
+
+        Integer offSlotBib = null;
+        Integer offSlotCc = null;
+        var startList = tulospalveluService.getStartList(COMPETITION_ID);
+        outer:
+        for (var cs : startList.getClassStart()) {
+            for (var ps : cs.getPersonStart()) {
+                for (var rs : ps.getStart()) {
+                    if (rs.getBibNumber() == null || rs.getBibNumber().isBlank()) continue;
+                    int bib = Integer.parseInt(rs.getBibNumber().trim());
+                    if (view.getCardsByBib().containsKey(bib)) continue;
+                    if (rs.getControlCard() == null || rs.getControlCard().isEmpty()) continue;
+                    String ccVal = rs.getControlCard().getFirst().getValue();
+                    if (ccVal == null || ccVal.isBlank()) continue;
+                    try {
+                        offSlotCc = Integer.parseInt(ccVal.trim());
+                        offSlotBib = bib;
+                        break outer;
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        if (offSlotBib == null) return; // Ei sopivaa testidataa
+
+        assertNotNull(currentCard);
+        view.handleCardReading(offSlotCc);
+
+        List<ConfirmDialog> dialogs = ui.get(ConfirmDialog.class).all();
+        assertFalse(dialogs.isEmpty(),
+                "Eri lähtöajassa olevasta juoksijasta pitäisi näyttää dialogi");
+        assertTrue(dnsService.isStarted(PASSWORD, offSlotBib),
+                "Juoksija pitäisi merkitä lähteneeksi vaikka eri lähtöajassa");
     }
 }

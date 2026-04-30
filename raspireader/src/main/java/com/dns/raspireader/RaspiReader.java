@@ -330,6 +330,9 @@ public class RaspiReader {
         readLogger.logRead(cardNumber);
         if (ledRef != null) ledRef.recordActivity();
 
+        // TESTING: open the gate on every card read regardless of result
+        if (gateRef != null) gateRef.open();
+
         if (emitCheckMode) {
             // Emitcheck: read-only, just check if card is in startlist
             if (ledRef != null) {

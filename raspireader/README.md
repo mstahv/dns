@@ -34,28 +34,32 @@ Päivityslokit: `sudo journalctl -u raspireader-update`
 - Emit 250 USB reader (FTDI-based, appears as `/dev/ttyUSB0`)
 - Green LED + 330Ω resistor
 - Red LED + 330Ω resistor
+- Piezo-summeri (esim. Arduino Starter Kit R4)
+- SG90 mikroservo (esim. Arduino Starter Kit R4) — lähtöporttia varten
 
-## LED Wiring
+## Kytkennät
 
-Two LEDs are used to indicate the result of each card read:
+### GPIO-pinnikartta
 
-| LED | GPIO (BCM) | Physical pin | Meaning |
-|-----|-----------|--------------|---------|
-| Green | 17 | 11 | Runner found / start time indicator |
-| Red | 27 | 13 | Error / warning indicator |
+| Komponentti | GPIO (BCM) | Fyysinen pinni | Tarkoitus |
+|-------------|-----------|----------------|-----------|
+| Vihreä LED | 17 | 11 | Juoksija löytyi / lähtöajan ilmaisin |
+| Punainen LED | 27 | 13 | Virhe / varoitus |
+| Summeri (piezo) | 22 | 15 | Äänimerkit (myöhässä / virhe) |
+| Servo (PWM) | 18 | 12 | Lähtöportti (hardware PWM0) |
 
-### LED Signals
+### Signaalit kortinluvun jälkeen
 
-After each card read, LEDs indicate the result:
+| Tilanne | Vihreä | Punainen | Summeri | Portti | Merkitys |
+|---------|--------|----------|---------|--------|----------|
+| 0–4 min lähtöön | Vilkkuu | Pois | — | Auki | Ohjaa juoksija oikeaan lähtöhetkeen |
+| 4–5 min lähtöön | Palaa jatkuvana | Pois | — | Auki | Normaali tilanne lähdössä |
+| >5 min lähtöön | Vuorottelee | Vuorottelee | — | Kiinni | Juoksija liian aikaisin |
+| Lähtöaika mennyt | Vilkkuu 4× | Pois | 3× lyhyt piip | Auki | Juoksija myöhässä |
+| Kortti tuntematon | Palaa | Vilkkuu | 1× pitkä piip | Kiinni | Korttia ei löydy |
+| Serverivirhe | Pois | Vilkkuu | 1× pitkä piip | Kiinni | Yhteysongelma |
 
-| Tilanne | Vihreä | Punainen | Merkitys |
-|---------|--------|----------|----------|
-| Juoksija löytyi, 0–4 min lähtöön | Vilkkuu | Pois | Ohjaa juoksija oikeaan lähtöhetkeen |
-| Juoksija löytyi, 4–5 min lähtöön | Palaa jatkuvana | Pois | Normaali tilanne lähdössä |
-| Juoksija löytyi, >5 min lähtöön | Vilkkuu vuorotellen | Vilkkuu vuorotellen | Juoksija liian aikaisin |
-| Juoksija löytyi, lähtöaika mennyt | Vilkkuu tuplanopeudella | Pois | Juoksija myöhässä |
-| Kortti tuntematon (`found:false`) | Palaa jatkuvana | Vilkkuu | Korttia ei löydy järjestelmästä |
-| Serverivirhe / ei vastausta | Pois | Vilkkuu | Yhteysongelma tai muu virhe |
+Lähtöportti pysyy auki 2 sekuntia viimeisestä lukijan viestistä. Jos sama kortti on lukijalla pidempään, portin auki-aikaa jatketaan automaattisesti.
 
 ### Idle-tila (ei kortinlukuja 20 s)
 
@@ -78,25 +82,31 @@ Raspberry Pi:n levyllä oleva ACT LED indikoi yhteystilaa:
 | Yksittäinen välähdys 5s välein | Verkko toimii, mutta WS-yhteys poikki |
 | Jatkuva vilkutus | Ei verkkoyhteyttä lainkaan |
 
+### Kytkentäkaavio
+
 ```
-Raspberry Pi                  LEDs
------------                  -----
+Raspberry Pi                  Komponentit
+-----------                  -----------
 GPIO 17 (pin 11) ---[330Ω]---[GREEN LED+]---[GREEN LED-]---+
-GPIO 27 (pin 13) ---[330Ω]---[RED LED+]-----[RED LED-]-----+--- GND (pin 9 or 14)
+GPIO 27 (pin 13) ---[330Ω]---[RED LED+]-----[RED LED-]-----+--- GND (pin 14)
+GPIO 22 (pin 15) ---[BUZZER+]---[BUZZER-]------------------+
+GPIO 18 (pin 12) ---[SERVO signal (oranssi/keltainen)]
+         5V (pin 2) ---[SERVO VCC (punainen)]
+        GND (pin 6) ---[SERVO GND (ruskea)]
 ```
 
 Pin layout on the Pi header:
 
 ```
                     +-----+
-               3V3  | 1  2| 5V
+               3V3  | 1  2| 5V  <-- servo VCC (punainen)
              GPIO2  | 3  4| 5V
-             GPIO3  | 5  6| GND
+             GPIO3  | 5  6| GND  <-- servo GND (ruskea)
              GPIO4  | 7  8| GPIO14
                GND  | 9 10| GPIO15
-  GREEN --> GPIO17  |11 12| GPIO18
-    RED --> GPIO27  |13 14| GND  <-- shared ground
-            GPIO22  |15 16| GPIO23
+  GREEN --> GPIO17  |11 12| GPIO18  <-- SERVO signal
+    RED --> GPIO27  |13 14| GND  <-- shared ground (LEDs + buzzer)
+ BUZZER --> GPIO22  |15 16| GPIO23
                3V3  |17 18| GPIO24
             GPIO10  |19 20| GND
              GPIO9  |21 22| GPIO25
@@ -105,11 +115,35 @@ Pin layout on the Pi header:
                     +-----+
 ```
 
-**Connect:**
-1. GPIO 17 (pin 11) → 330Ω resistor → Green LED anode (long leg) → cathode → GND (pin 14)
-2. GPIO 27 (pin 13) → 330Ω resistor → Red LED anode (long leg) → cathode → GND (pin 14)
+### Kytkentäohjeet
 
-Both LED cathodes can share the same GND pin (pin 9 or 14).
+**LEDit:**
+1. GPIO 17 (pin 11) → 330Ω vastus → vihreä LED anodi (pitkä jalka) → katodi → GND (pin 14)
+2. GPIO 27 (pin 13) → 330Ω vastus → punainen LED anodi (pitkä jalka) → katodi → GND (pin 14)
+
+**Summeri (piezo, Arduino Starter Kit R4):**
+3. GPIO 22 (pin 15) → summerin + → summerin − → GND (pin 14)
+
+Piezo-summeri ei tarvitse vastusta (minimaalinen virrankulutus).
+
+**Mikroservo (SG90, Arduino Starter Kit R4):**
+4. GPIO 18 (pin 12) → servon signaalijohtoon (oranssi/keltainen)
+5. Pin 2 (5V) → servon VCC-johtoon (punainen)
+6. Pin 6 (GND) → servon GND-johtoon (ruskea)
+
+SG90 servon johtojärjestys: ruskea=GND, punainen=VCC, oranssi=signaali.
+
+### Hardware PWM -konfiguraatio (servo)
+
+Servo vaatii hardware PWM:n GPIO 18:lla. Lisää `/boot/firmware/config.txt` -tiedostoon (vanhemmissa: `/boot/config.txt`):
+
+```
+dtoverlay=pwm
+```
+
+Käynnistä Pi uudelleen konfiguraation jälkeen. Tämä luo sysfs-rajapinnan `/sys/class/pwm/pwmchip0/pwm0`.
+
+**Huom:** Jos servoa ei ole kytketty tai PWM-overlay puuttuu, lukija käynnistyy normaalisti ilman porttitoimintoa (lokiin tulostuu varoitus).
 
 ## Build
 

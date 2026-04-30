@@ -39,6 +39,8 @@ public class RaspiReader {
         String serialDevice = "";
         String logPath = "/var/log/raspireader/reads.log";
         boolean emitCheck = false;
+        int pwmChip = -1;
+        int pwmChannel = -1;
 
         // Parse command line arguments
         for (int i = 0; i < args.length; i++) {
@@ -48,6 +50,8 @@ public class RaspiReader {
                 case "--serial" -> serialDevice = args[++i];
                 case "--log" -> logPath = args[++i];
                 case "--emitcheck" -> emitCheck = true;
+                case "--pwm-chip" -> pwmChip = Integer.parseInt(args[++i]);
+                case "--pwm-channel" -> pwmChannel = Integer.parseInt(args[++i]);
                 case "--help" -> {
                     printHelp();
                     return;
@@ -63,17 +67,53 @@ public class RaspiReader {
         LOG.info("  Machine ID: " + machineId);
         LOG.info("  Log file: " + logPath);
 
+        // Probe serial port once: missing = console input mode (dev fallback).
+        // Otherwise we discard this handle and let the reconnect loop reopen it.
+        boolean consoleMode = findSerialPort(serialDevice) == null;
+        if (consoleMode) {
+            LOG.info("  Serial port: not found — console input mode");
+        }
+
         // Initialize Pi4J for GPIO
         Context pi4j = null;
         LedController led = null;
         try {
             pi4j = Pi4J.newAutoContext();
             led = new LedController(pi4j);
-            LOG.info("  GPIO LEDs: green=BCM" + LedController.GREEN_GPIO_PIN
-                    + ", red=BCM" + LedController.RED_GPIO_PIN);
+            LOG.info("  GPIO: green LED=BCM" + LedController.GREEN_GPIO_PIN
+                    + ", red LED=BCM" + LedController.RED_GPIO_PIN);
         } catch (Exception e) {
             LOG.warning("GPIO not available (not running on Pi?): " + e.getMessage());
             LOG.warning("  LED signaling will be disabled");
+        }
+
+        // Initialize buzzer (same Pi4J context as LEDs)
+        BuzzerController buzzer = null;
+        if (pi4j != null) {
+            try {
+                buzzer = new BuzzerController(pi4j);
+                LOG.info("  Buzzer: BCM" + BuzzerController.BUZZER_GPIO_PIN);
+            } catch (Exception e) {
+                LOG.warning("Buzzer not available: " + e.getMessage());
+            }
+        }
+
+        // Initialize servo gate (hardware PWM via sysfs, independent of Pi4J)
+        GateController gate = null;
+        try {
+            // Auto-detect PWM chip/channel based on Pi model if not specified
+            if (pwmChip < 0 || pwmChannel < 0) {
+                int[] defaults = GateController.detectPwmDefaults();
+                if (pwmChip < 0) pwmChip = defaults[0];
+                if (pwmChannel < 0) pwmChannel = defaults[1];
+            }
+            gate = new GateController(pwmChip, pwmChannel);
+            LOG.info("  Servo gate: pwmchip" + gate.getPwmChip()
+                    + "/pwm" + gate.getPwmChannel() + " (GPIO 18)");
+        } catch (Exception e) {
+            LOG.warning("Servo gate not available: " + e.getMessage());
+            LOG.warning("  Ensure dtoverlay=pwm is set in /boot/firmware/config.txt");
+            LOG.warning("  Try --pwm-chip N --pwm-channel N if auto-detect is wrong");
         }
 
         // Initialize onboard ACT LED
@@ -90,6 +130,8 @@ public class RaspiReader {
         Emit250Protocol protocol = new Emit250Protocol();
 
         final LedController ledRef = led;
+        final BuzzerController buzzerRef = buzzer;
+        final GateController gateRef = gate;
         final boolean emitCheckMode = emitCheck;
 
         final String finalBaseUrl = baseUrl;
@@ -98,7 +140,7 @@ public class RaspiReader {
         // Derive WebSocket URL from base URL
         String wsUrl = baseUrl.replaceFirst("^http", "ws") + "/ws/machine-reading";
 
-        // Server response callback — may override LED if it disagrees with cache
+        // Server response callback — may override LED/buzzer/gate if it disagrees with cache
         MachineWebSocket ws = new MachineWebSocket(wsUrl, machineId, version, startlistCache,
                 response -> {
                     int displayedCard = lastDisplayedCard;
@@ -108,20 +150,21 @@ public class RaspiReader {
                     var cached = startlistCache.lookup(displayedCard);
                     boolean cacheFoundIt = cached != null;
 
-                    // If server disagrees with cache, override LEDs
+                    // If server disagrees with cache, override feedback
                     if (response.found() && !cacheFoundIt) {
                         // Cache missed but server found it — show found pattern
-                        showFoundLed(ledRef, response.startTime());
+                        showFoundFeedback(ledRef, buzzerRef, gateRef, response.startTime());
                     } else if (!response.found() && cacheFoundIt) {
-                        // Cache had it but server says not found (emit changed?) — correct to not-registered
+                        // Cache had it but server says not found — correct to not-registered
                         ledRef.greenOnBlinkRed();
+                        if (buzzerRef != null) buzzerRef.oneLongBeep();
                     } else if (!response.found() && !cacheFoundIt) {
                         // Both agree: not found
                         ledRef.greenOnBlinkRed();
                     }
                     // If both agree found, server response may have more accurate startTime
                     if (response.found() && cacheFoundIt && response.startTime() != null) {
-                        showFoundLed(ledRef, response.startTime());
+                        showFoundFeedback(ledRef, buzzerRef, gateRef, response.startTime());
                     }
                 },
                 () -> triggerOtaUpdate(),
@@ -143,17 +186,46 @@ public class RaspiReader {
         // Register shutdown hook
         final Context pi4jRef = pi4j;
         final LedController ledShutdownRef = led;
+        final BuzzerController buzzerShutdownRef = buzzer;
+        final GateController gateShutdownRef = gate;
         final OnboardLed onboardLedShutdownRef = onboardLed;
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             LOG.info("Shutting down...");
             ws.shutdown();
             if (ledShutdownRef != null) ledShutdownRef.shutdown();
+            if (buzzerShutdownRef != null) buzzerShutdownRef.shutdown();
+            if (gateShutdownRef != null) gateShutdownRef.shutdown();
             if (onboardLedShutdownRef != null) onboardLedShutdownRef.shutdown();
             if (pi4jRef != null) pi4jRef.shutdown();
         }));
 
-        // Main loop with serial port reconnection
+        // Console fallback: no serial reader present, accept manual input from stdin
+        if (consoleMode) {
+            System.out.println("Emit-lukijaa ei löytynyt. Syötä emit-korttien numeroita:");
+            var consoleInput = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+            try {
+                String line;
+                while ((line = consoleInput.readLine()) != null) {
+                    line = line.trim();
+                    if (line.isEmpty()) continue;
+                    int cardNumber;
+                    try {
+                        cardNumber = Integer.parseInt(line);
+                    } catch (NumberFormatException e) {
+                        System.out.println("Virheellinen numero: " + line);
+                        continue;
+                    }
+                    processCardRead(cardNumber, ledRef, buzzerRef, gateRef,
+                            startlistCache, readLogger, ws, buffer, emitCheckMode);
+                }
+            } catch (Exception e) {
+                LOG.log(Level.WARNING, "Console input error", e);
+            }
+            return;
+        }
+
+        // Serial mode: outer loop reconnects on USB unplug, inner loop reads cards
         byte[] readBuffer = new byte[256];
         int lastCardNumber = -1;
         int previousCardNumber = -1;
@@ -209,60 +281,27 @@ public class RaspiReader {
                     consecutiveErrors = 0;
 
                     Emit250Protocol.CardReading reading = protocol.feedBytes(readBuffer, 0, bytesRead);
-                    if (reading != null) {
-                        int cardNumber = reading.cardNumber();
-                        long now = System.currentTimeMillis();
+                    if (reading == null) continue;
 
-                        if (cardNumber == lastCardNumber) {
-                            boolean differentCardInBetween = previousCardNumber != lastCardNumber && previousCardNumber != -1;
-                            boolean timeoutExceeded = (now - lastReadTime) > REREAD_TIMEOUT_MS;
-                            if (!differentCardInBetween && !timeoutExceeded) {
-                                if (ledRef != null) ledRef.extendBlinking();
-                                continue;
-                            }
-                        }
-                        previousCardNumber = lastCardNumber;
-                        lastCardNumber = cardNumber;
-                        lastReadTime = now;
-                        lastDisplayedCard = cardNumber;
+                    int cardNumber = reading.cardNumber();
+                    long now = System.currentTimeMillis();
 
-                        LOG.info("Card read: " + cardNumber);
-                        readLogger.logRead(cardNumber);
-                        if (ledRef != null) ledRef.recordActivity();
-
-                        if (emitCheckMode) {
-                            if (ledRef != null) {
-                                var cached = startlistCache.lookup(cardNumber);
-                                if (cached != null) {
-                                    ledRef.blinkGreen();
-                                } else {
-                                    ledRef.blinkRed();
-                                }
-                            }
-                        } else {
-                            if (ledRef != null) {
-                                var cached = startlistCache.lookup(cardNumber);
-                                if (cached != null) {
-                                    showFoundLed(ledRef, cached.startTime());
-                                } else {
-                                    ledRef.greenOnBlinkRed();
-                                }
-                            }
-
-                            if (!ws.sendReading(cardNumber)) {
-                                buffer.add(cardNumber);
-                                LOG.info("Buffered card (WS disconnected): " + cardNumber);
-                            }
-
-                            if (ws.isConnected() && buffer.hasData()) {
-                                for (int buffered : buffer.snapshot()) {
-                                    if (ws.sendReading(buffered)) {
-                                        buffer.removeAll(java.util.List.of(buffered));
-                                    }
-                                }
-                            }
+                    // Same card still on reader — extend feedback, skip sending
+                    if (cardNumber == lastCardNumber) {
+                        boolean differentCardInBetween = previousCardNumber != lastCardNumber && previousCardNumber != -1;
+                        boolean timeoutExceeded = (now - lastReadTime) > REREAD_TIMEOUT_MS;
+                        if (!differentCardInBetween && !timeoutExceeded) {
+                            if (ledRef != null) ledRef.extendBlinking();
+                            if (gateRef != null) gateRef.extendOpen();
+                            continue;
                         }
                     }
+                    previousCardNumber = lastCardNumber;
+                    lastCardNumber = cardNumber;
+                    lastReadTime = now;
+
+                    processCardRead(cardNumber, ledRef, buzzerRef, gateRef,
+                            startlistCache, readLogger, ws, buffer, emitCheckMode);
                 } catch (Exception e) {
                     consecutiveErrors++;
                     LOG.log(Level.WARNING, "Serial port error (" + consecutiveErrors + "/" + MAX_CONSECUTIVE_ERRORS + ")", e);
@@ -281,24 +320,81 @@ public class RaspiReader {
         }
     }
 
-    static void showFoundLed(LedController led, LocalTime startTime) {
+    private static void processCardRead(int cardNumber,
+                                        LedController ledRef, BuzzerController buzzerRef,
+                                        GateController gateRef, StartlistCache startlistCache,
+                                        ReadLogger readLogger, MachineWebSocket ws,
+                                        CardBuffer buffer, boolean emitCheckMode) {
+        lastDisplayedCard = cardNumber;
+        LOG.info("Card read: " + cardNumber);
+        readLogger.logRead(cardNumber);
+        if (ledRef != null) ledRef.recordActivity();
+
+        if (emitCheckMode) {
+            // Emitcheck: read-only, just check if card is in startlist
+            if (ledRef != null) {
+                var cached = startlistCache.lookup(cardNumber);
+                if (cached != null) {
+                    ledRef.blinkGreen();
+                } else {
+                    ledRef.blinkRed();
+                }
+            }
+            return;
+        }
+
+        // Normal mode: immediate feedback from cache, then send to server
+        if (ledRef != null) {
+            var cached = startlistCache.lookup(cardNumber);
+            if (cached != null) {
+                showFoundFeedback(ledRef, buzzerRef, gateRef, cached.startTime());
+            } else {
+                ledRef.greenOnBlinkRed();
+                if (buzzerRef != null) buzzerRef.oneLongBeep();
+            }
+        }
+
+        // Send via WebSocket (async) — server response may override LED
+        if (!ws.sendReading(cardNumber)) {
+            buffer.add(cardNumber);
+            LOG.info("Buffered card (WS disconnected): " + cardNumber);
+        }
+
+        // Flush buffer if connected
+        if (ws.isConnected() && buffer.hasData()) {
+            for (int buffered : buffer.snapshot()) {
+                if (ws.sendReading(buffered)) {
+                    buffer.removeAll(java.util.List.of(buffered));
+                }
+            }
+        }
+    }
+
+    static void showFoundFeedback(LedController led, BuzzerController buzzer,
+                                   GateController gate, LocalTime startTime) {
         if (startTime != null) {
             long secondsToStart = Duration.between(LocalTime.now(), startTime).toSeconds();
             if (secondsToStart < 0) {
-                // Already late
-                led.blinkGreenFast();
+                // Already late — let through but warn
+                if (led != null) led.blinkGreenFast();
+                if (buzzer != null) buzzer.threeShortBeeps();
+                if (gate != null) gate.open();
             } else if (secondsToStart <= 4 * 60) {
                 // 0–4 min: guide runner to correct start
-                led.blinkGreen();
+                if (led != null) led.blinkGreen();
+                if (gate != null) gate.open();
             } else if (secondsToStart < 5 * 60) {
                 // 4:01–4:59: normal pre-start, steady green
-                led.greenSteady();
+                if (led != null) led.greenSteady();
+                if (gate != null) gate.open();
             } else {
-                // >5 min: too early
-                led.alternateGreenRed();
+                // >5 min: too early — no gate, no buzzer
+                if (led != null) led.alternateGreenRed();
             }
         } else {
-            led.blinkGreen();
+            // Found but no start time — OK
+            if (led != null) led.blinkGreen();
+            if (gate != null) gate.open();
         }
     }
 
@@ -489,6 +585,9 @@ public class RaspiReader {
                   --log <path>         Log file path (default: /var/log/raspireader/reads.log)
                   --emitcheck          Emit check mode: read-only, no start registration.
                                        Green blink = card found, red blink = not found.
+                  --pwm-chip <n>       PWM chip number for servo (default: auto-detect by Pi model)
+                  --pwm-channel <n>    PWM channel for servo (default: auto-detect by Pi model)
+                                       Pi 5: chip=0 channel=2, older Pis: chip=0 channel=0
                   --help               Show this help
                 """);
     }

@@ -113,6 +113,7 @@ public class MachineReadingView extends VerticalLayout {
         machineGrid.addComponentColumn(cm -> new ServerActions(cm)).setHeader("Toiminnot");
         machineGrid.addComponentColumn(cm -> new ApproveToggle(cm)).setHeader("Hyväksytty");
         machineGrid.addComponentColumn(cm -> new RemoveButton(cm)).setHeader("");
+        machineGrid.getColumns().forEach(c -> c.setAutoWidth(true).setResizable(true));
         machineGrid.setWidthFull();
         refreshMachines();
 
@@ -235,7 +236,6 @@ public class MachineReadingView extends VerticalLayout {
             grid.setItems(lines);
             grid.addColumn(line -> line).setHeader("Loki");
             grid.setSizeFull();
-            grid.getStyle().setFontSize("var(--lumo-font-size-s)");
             return grid;
         }
     }

@@ -60,7 +60,7 @@ public class MachineReadingService {
      * such readings; the registering user is captured separately on the
      * resulting DnsEntry.
      */
-    private static final String BROWSER_MACHINE_ID = "browser-webserial";
+    public static final String BROWSER_MACHINE_ID = "browser-webserial";
 
     /**
      * Finds or creates a global Machine by its device identifier.

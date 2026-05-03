@@ -7,6 +7,7 @@ import com.example.dns.domain.Machine;
 import com.example.dns.domain.MachineReading;
 import com.example.dns.domain.MachineReadingRepository;
 import com.example.dns.domain.MachineRepository;
+import com.example.dns.service.MachineReadingService;
 import com.example.dns.service.UserSession;
 import com.vaadin.flow.component.Component;
 import com.vaadin.flow.component.UI;
@@ -128,6 +129,7 @@ public class MachineReadingView extends VerticalLayout {
                 .collect(Collectors.toSet());
         var available = machineRepository.findAll().stream()
                 .filter(m -> !associatedMachineIds.contains(m.getId()))
+                .filter(m -> !MachineReadingService.BROWSER_MACHINE_ID.equals(m.getMachineId()))
                 .toList();
         combo.setItems(available);
     }

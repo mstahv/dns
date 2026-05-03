@@ -173,14 +173,21 @@ public class RaspiReader {
 
         ws.connect();
 
+        // Tracks whether the USB serial reader is currently open. In console mode
+        // there is no reader to monitor, so we treat it as always "connected".
+        final java.util.concurrent.atomic.AtomicBoolean readerConnected =
+                new java.util.concurrent.atomic.AtomicBoolean(consoleMode);
+
         // Start onboard LED connection status indicator
         if (onboardLed != null) {
-            onboardLed.startStatusIndicator(ws::isConnected);
+            onboardLed.startStatusIndicator(() -> ws.isConnected() && readerConnected.get());
         }
 
-        // Start idle heartbeat on external LEDs
+        // Start idle heartbeat on external LEDs — green "OK" heartbeat requires
+        // both server and reader to be alive, otherwise we fall through to the
+        // disconnected (red) indicator.
         if (led != null) {
-            led.startIdleHeartbeat(ws::isConnected);
+            led.startIdleHeartbeat(() -> ws.isConnected() && readerConnected.get());
         }
 
         // Register shutdown hook
@@ -254,6 +261,7 @@ public class RaspiReader {
                 continue;
             }
             LOG.info("Serial port opened: " + port.getSystemPortName());
+            readerConnected.set(true);
 
             // Read loop — breaks out on repeated errors to reconnect
             int consecutiveErrors = 0;
@@ -313,6 +321,7 @@ public class RaspiReader {
 
             // Too many errors — close port, will reconnect at top of outer loop
             LOG.warning("Serial port lost, closing and reconnecting...");
+            readerConnected.set(false);
             try { port.closePort(); } catch (Exception ignored) {}
             try { Thread.sleep(5000); } catch (InterruptedException e) {
                 Thread.currentThread().interrupt(); break;

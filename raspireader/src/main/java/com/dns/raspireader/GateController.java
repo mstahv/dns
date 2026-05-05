@@ -20,8 +20,8 @@ public class GateController {
 
     private static final Logger LOG = Logger.getLogger(GateController.class.getName());
 
-    private static final double CLOSED_ANGLE = 10;
-    private static final double OPEN_ANGLE = 100;
+    private static final double CLOSED_ANGLE = 100;
+    private static final double OPEN_ANGLE = 10;
     private static final long OPEN_DURATION_MS = 2000;
 
     private final Sg90Servo servo;

@@ -32,6 +32,7 @@ import org.vaadin.firitin.components.button.VButton;
 import org.vaadin.firitin.components.cssgrid.CssGrid;
 import org.vaadin.firitin.components.popover.PopoverButton;
 import org.vaadin.firitin.layouts.HorizontalFloatLayout;
+import org.vaadin.firitin.util.ScreenWakeLock;
 import org.vaadin.firitin.util.WebAudio;
 
 import javax.xml.datatype.XMLGregorianCalendar;
@@ -656,6 +657,11 @@ public class DnsView extends VerticalLayout {
         Emit250ReaderButton emit250ReaderButton = new Emit250ReaderButton(() -> {
             Notification.show("Lukija valmis");
         }, card -> handleCardReading(card.ecardNumber()));
+        emit250ReaderButton.getContent().addClickListener(event -> {
+            // Also request wake lock
+            ScreenWakeLock.request();
+        });
+        emit250ReaderButton.setFilterUsbReaders(true);
         emit250ReaderButton.getContent().setText("");
         emit250ReaderButton.getContent().setIcon(VaadinIcon.AUTOMATION.create());
         findAncestor(TopLayout.class).addNavbarHelper(emit250ReaderButton);

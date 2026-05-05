@@ -36,6 +36,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -183,11 +184,8 @@ public class TableView extends VerticalLayout {
         grid.addColumn(RunnerRow::className).setHeader("Sarja").setSortable(true);
         var timeCol = grid.addColumn(r -> r.startTime() != null ? r.startTime().format(TIME_FMT) : "")
                 .setHeader("Lähtöaika").setSortable(true)
-                .setComparator((a, b) -> {
-                    if (a.startTime() == null) return 1;
-                    if (b.startTime() == null) return -1;
-                    return a.startTime().compareTo(b.startTime());
-                });
+                .setComparator(Comparator.comparing(RunnerRow::startTime,
+                        Comparator.nullsLast(Comparator.naturalOrder())));
         grid.addColumn(RunnerRow::startPlace).setHeader("Lähtöpaikka").setSortable(true);
         grid.addColumn(r -> {
                     if (!r.started()) return "";

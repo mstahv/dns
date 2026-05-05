@@ -27,7 +27,7 @@ public abstract class Servo {
     public void init() throws IOException {
         pwmChip.export();
         pwmChip.setPeriodMs(1000.0 / frequencyHz());
-        setAngle(0);
+        setAngle(10);
         pwmChip.enable();
     }
 

@@ -24,7 +24,11 @@ public class StartListLookupService {
      * for all runners in a competition.
      */
     public Map<String, ControlCardEntry> buildControlCardMap(String competitionId) {
-        StartList startList = tulospalveluService.getStartList(competitionId);
+        return buildControlCardMap(competitionId, 1);
+    }
+
+    public Map<String, ControlCardEntry> buildControlCardMap(String competitionId, int stage) {
+        StartList startList = tulospalveluService.getStartList(competitionId, stage);
         if (startList == null) {
             return Map.of();
         }
@@ -56,7 +60,11 @@ public class StartListLookupService {
     }
 
     public Optional<RunnerInfo> findByBib(String competitionId, int bib) {
-        StartList startList = tulospalveluService.getStartList(competitionId);
+        return findByBib(competitionId, 1, bib);
+    }
+
+    public Optional<RunnerInfo> findByBib(String competitionId, int stage, int bib) {
+        StartList startList = tulospalveluService.getStartList(competitionId, stage);
         if (startList == null) {
             return Optional.empty();
         }
@@ -78,7 +86,11 @@ public class StartListLookupService {
     }
 
     public Optional<RunnerInfo> findByControlCard(String competitionId, String cc) {
-        StartList startList = tulospalveluService.getStartList(competitionId);
+        return findByControlCard(competitionId, 1, cc);
+    }
+
+    public Optional<RunnerInfo> findByControlCard(String competitionId, int stage, String cc) {
+        StartList startList = tulospalveluService.getStartList(competitionId, stage);
         if (startList == null) {
             return Optional.empty();
         }

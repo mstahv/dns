@@ -6,6 +6,7 @@ import com.vaadin.browserless.VaadinTestApplicationContext;
 import com.vaadin.browserless.VaadinTestUiContext;
 import com.vaadin.browserless.internal.Routes;
 import com.vaadin.flow.component.button.Button;
+import com.vaadin.flow.component.textfield.IntegerField;
 import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
 import org.junit.jupiter.api.AfterEach;
@@ -16,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
@@ -86,5 +88,37 @@ class MainViewTest {
         assertTrue(staffUser.getCurrentView() instanceof DnsView,
                 "Should navigate to DnsView after login, but got: "
                         + staffUser.getCurrentView().getClass().getSimpleName());
+    }
+
+    @Test
+    void createPanelHasStageFieldDefaultingToOne() {
+        VaadinTestUiContext user = app.newUser().newWindow();
+        user.navigate(MainView.class);
+
+        IntegerField stageField = user.get(IntegerField.class).all().stream()
+                .filter(f -> f.getLabel() != null && f.getLabel().startsWith("Osa"))
+                .findFirst().orElseThrow();
+
+        assertEquals(1, stageField.getValue(),
+                "Stage field should default to 1 (single-stage competitions)");
+    }
+
+    @Test
+    void competitionPersistsStage() {
+        // Clean any leftover record
+        competitionRepository.deleteById("smfinaali");
+
+        var competition = new com.example.dns.domain.Competition();
+        competition.setCompetitionId("2026_smsprint");
+        competition.setPassword("smfinaali");
+        competition.setStage(2);
+        competitionRepository.save(competition);
+
+        var loaded = competitionRepository.findById("smfinaali").orElseThrow();
+        assertEquals(2, loaded.getStage(),
+                "Stage should round-trip through the database");
+        assertEquals("2026_smsprint", loaded.getCompetitionId());
+
+        competitionRepository.deleteById("smfinaali");
     }
 }

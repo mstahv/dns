@@ -57,11 +57,12 @@ public class TableView extends VerticalLayout {
 
     private String password;
     private String competitionId;
+    private int stage = 1;
     private List<RunnerRow> allRunners;
     private ListDataProvider<RunnerRow> dataProvider;
     private VGrid<RunnerRow> grid;
     private SharedNumberSignal changeSignal;
-    private java.util.function.Consumer<String> startListListener;
+    private java.util.function.BiConsumer<String, Integer> startListListener;
 
     private String nameFilter = "";
     private String numberFilter = "";
@@ -87,17 +88,20 @@ public class TableView extends VerticalLayout {
             return;
         }
         this.password = password;
-        this.competitionId = competitionRepository.findById(password)
-                .map(c -> c.getCompetitionId())
-                .orElse(password);
+        var competition = competitionRepository.findById(password).orElse(null);
+        this.competitionId = competition != null ? competition.getCompetitionId() : password;
+        this.stage = competition != null ? competition.getStage() : 1;
         removeAll();
         buildView();
     }
 
     private void buildView() {
-        add(new H1("DNS - " + competitionId));
+        String title = stage > 1
+                ? "DNS - " + competitionId + " (osa " + stage + ")"
+                : "DNS - " + competitionId;
+        add(new H1(title));
 
-        StartList startList = tulospalveluService.getStartList(competitionId);
+        StartList startList = tulospalveluService.getStartList(competitionId, stage);
         if (startList == null) {
             return;
         }
@@ -248,11 +252,11 @@ public class TableView extends VerticalLayout {
         if (changeSignal != null) {
             ElementEffect.effect(getElement(), () -> {
                 changeSignal.get();
-                getUI().ifPresent(ui -> ui.access(this::syncFromSignal));
+                syncFromSignal();
             });
         }
-        startListListener = updatedCompetitionId -> {
-            if (updatedCompetitionId.equals(competitionId)) {
+        startListListener = (updatedCompetitionId, updatedStage) -> {
+            if (updatedCompetitionId.equals(competitionId) && updatedStage == stage) {
                 getUI().ifPresent(ui -> ui.access(() -> setCompetition(password)));
             }
         };

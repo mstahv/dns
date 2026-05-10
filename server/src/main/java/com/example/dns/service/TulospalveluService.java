@@ -30,7 +30,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 @Service
 public class TulospalveluService {
@@ -48,7 +48,7 @@ public class TulospalveluService {
     private final Map<String, String> createTimeCache = new ConcurrentHashMap<>();
     private final Map<String, FileTime> diskWriteTimeCache = new ConcurrentHashMap<>();
     private final Set<String> locallyOverridden = ConcurrentHashMap.newKeySet();
-    private final List<Consumer<String>> startListUpdateListeners = new CopyOnWriteArrayList<>();
+    private final List<BiConsumer<String, Integer>> startListUpdateListeners = new CopyOnWriteArrayList<>();
     private volatile List<CompetitionInfo> eventsCache;
     private volatile Instant eventsCacheTime;
 
@@ -91,7 +91,12 @@ public class TulospalveluService {
     }
 
     public StartList getStartList(String competitionId) {
-        return startListCache.computeIfAbsent(competitionId, this::loadStartList);
+        return getStartList(competitionId, 1);
+    }
+
+    public StartList getStartList(String competitionId, int stage) {
+        return startListCache.computeIfAbsent(cacheKey(competitionId, stage),
+                k -> loadStartList(competitionId, stage));
     }
 
     /**
@@ -105,49 +110,65 @@ public class TulospalveluService {
             return;
         }
         log.info("Scheduled start list refresh for {} competitions", startListCache.size());
-        for (String competitionId : startListCache.keySet()) {
-            refreshStartList(competitionId);
+        for (String key : startListCache.keySet()) {
+            int idx = key.lastIndexOf('_');
+            String competitionId = key.substring(0, idx);
+            int stage = Integer.parseInt(key.substring(idx + 1));
+            refreshStartList(competitionId, stage);
         }
     }
 
-    private void refreshStartList(String competitionId) {
-        String currentCreateTime = createTimeCache.get(competitionId);
-        log.info("Checking start list updates for {} (current createTime={})", competitionId, currentCreateTime);
+    private void refreshStartList(String competitionId, int stage) {
+        String key = cacheKey(competitionId, stage);
+        String currentCreateTime = createTimeCache.get(key);
+        log.info("Checking start list updates for {} stage {} (current createTime={})",
+                competitionId, stage, currentCreateTime);
 
         // Check local disk cache first — if file was modified externally, use it
         // and skip the HTTP call (useful for testing: edit XML by hand)
-        if (checkLocalDiskCache(competitionId, currentCreateTime)) {
+        if (checkLocalDiskCache(competitionId, stage, currentCreateTime)) {
             return;
         }
 
         // If locally overridden (manual edit active), skip server entirely
-        if (locallyOverridden.contains(competitionId)) {
-            log.info("[TEST CHECK] Skipping server refresh for {} — local override active", competitionId);
+        if (locallyOverridden.contains(key)) {
+            log.info("[TEST CHECK] Skipping server refresh for {} stage {} — local override active",
+                    competitionId, stage);
             return;
         }
 
         // Disk unchanged — check remote server
         try {
-            StartList fresh = downloadStartList(competitionId);
+            StartList fresh = downloadStartList(competitionId, stage);
             if (fresh == null) {
                 return;
             }
             String freshCreateTime = extractCreateTime(fresh);
 
             if (!Objects.equals(freshCreateTime, currentCreateTime)) {
-                log.info("Start list updated from server for {} (createTime {} -> {})",
-                        competitionId, currentCreateTime, freshCreateTime);
-                logStartListDiff(competitionId, startListCache.get(competitionId), fresh);
-                startListCache.put(competitionId, fresh);
-                createTimeCache.put(competitionId, freshCreateTime);
-                writeDiskCache("startlist_" + competitionId + ".xml", fresh);
-                notifyStartListUpdated(competitionId);
+                log.info("Start list updated from server for {} stage {} (createTime {} -> {})",
+                        competitionId, stage, currentCreateTime, freshCreateTime);
+                logStartListDiff(competitionId, startListCache.get(key), fresh);
+                startListCache.put(key, fresh);
+                createTimeCache.put(key, freshCreateTime);
+                writeDiskCache(competitionId, stage, fresh);
+                notifyStartListUpdated(competitionId, stage);
             } else {
-                log.info("Start list unchanged for {} (createTime={})", competitionId, currentCreateTime);
+                log.info("Start list unchanged for {} stage {} (createTime={})",
+                        competitionId, stage, currentCreateTime);
             }
         } catch (Exception e) {
-            log.warn("Failed to refresh start list for {}, using cached version", competitionId, e);
+            log.warn("Failed to refresh start list for {} stage {}, using cached version",
+                    competitionId, stage, e);
         }
+    }
+
+    private static String cacheKey(String competitionId, int stage) {
+        return competitionId + "_" + stage;
+    }
+
+    private static String cacheFileName(String competitionId, int stage) {
+        return "startlist_" + competitionId + "_" + stage + ".xml";
     }
 
     /**
@@ -156,14 +177,15 @@ public class TulospalveluService {
      * wrote it. If modified externally, loads the file and updates in-memory cache.
      * Returns true if the local file was updated (skipping the remote HTTP call).
      */
-    private boolean checkLocalDiskCache(String competitionId, String currentCreateTime) {
-        Path cached = CACHE_DIR.resolve("startlist_" + competitionId + ".xml");
+    private boolean checkLocalDiskCache(String competitionId, int stage, String currentCreateTime) {
+        String key = cacheKey(competitionId, stage);
+        Path cached = CACHE_DIR.resolve(cacheFileName(competitionId, stage));
         if (!Files.exists(cached)) {
             return false;
         }
         try {
             FileTime fileModified = Files.getLastModifiedTime(cached);
-            FileTime lastWritten = diskWriteTimeCache.get(competitionId);
+            FileTime lastWritten = diskWriteTimeCache.get(key);
 
             if (lastWritten != null && fileModified.compareTo(lastWritten) <= 0) {
                 // File hasn't been touched since we wrote it
@@ -171,80 +193,78 @@ public class TulospalveluService {
             }
 
             // File was modified externally — parse and check createTime
-            log.info("[TEST CHECK] Local disk file modified externally for {} (fileTime={}, lastWritten={})",
-                    competitionId, fileModified, lastWritten);
+            log.info("[TEST CHECK] Local disk file modified externally for {} stage {} (fileTime={}, lastWritten={})",
+                    competitionId, stage, fileModified, lastWritten);
 
             try (InputStream is = Files.newInputStream(cached)) {
                 var diskStartList = (StartList) jaxbContext.createUnmarshaller().unmarshal(is);
                 String diskCreateTime = extractCreateTime(diskStartList);
 
                 if (!Objects.equals(diskCreateTime, currentCreateTime)) {
-                    log.info("[TEST CHECK] Start list updated from local disk for {} (createTime {} -> {}), local override active",
-                            competitionId, currentCreateTime, diskCreateTime);
-                    logStartListDiff(competitionId, startListCache.get(competitionId), diskStartList);
-                    startListCache.put(competitionId, diskStartList);
-                    createTimeCache.put(competitionId, diskCreateTime);
-                    diskWriteTimeCache.put(competitionId, fileModified);
-                    locallyOverridden.add(competitionId);
-                    notifyStartListUpdated(competitionId);
+                    log.info("[TEST CHECK] Start list updated from local disk for {} stage {} (createTime {} -> {}), local override active",
+                            competitionId, stage, currentCreateTime, diskCreateTime);
+                    logStartListDiff(competitionId, startListCache.get(key), diskStartList);
+                    startListCache.put(key, diskStartList);
+                    createTimeCache.put(key, diskCreateTime);
+                    diskWriteTimeCache.put(key, fileModified);
+                    locallyOverridden.add(key);
+                    notifyStartListUpdated(competitionId, stage);
                     return true;
                 } else {
-                    log.info("[TEST CHECK] Local disk file touched but createTime unchanged for {} (createTime={})",
-                            competitionId, diskCreateTime);
-                    diskWriteTimeCache.put(competitionId, fileModified);
+                    log.info("[TEST CHECK] Local disk file touched but createTime unchanged for {} stage {} (createTime={})",
+                            competitionId, stage, diskCreateTime);
+                    diskWriteTimeCache.put(key, fileModified);
                     return false;
                 }
             }
         } catch (Exception e) {
-            log.warn("Failed to read local disk cache for {}", competitionId, e);
+            log.warn("Failed to read local disk cache for {} stage {}", competitionId, stage, e);
         }
         return false;
     }
 
-    private StartList loadStartList(String competitionId) {
-        String cacheFileName = "startlist_" + competitionId + ".xml";
+    private StartList loadStartList(String competitionId, int stage) {
+        String key = cacheKey(competitionId, stage);
+        String fileName = cacheFileName(competitionId, stage);
         try {
-            Path cached = CACHE_DIR.resolve(cacheFileName);
+            Path cached = CACHE_DIR.resolve(fileName);
             if (Files.exists(cached)) {
                 log.info("Loading start list from disk cache: {}", cached);
                 try (InputStream is = Files.newInputStream(cached)) {
                     var startList = (StartList) jaxbContext.createUnmarshaller().unmarshal(is);
-                    createTimeCache.put(competitionId, extractCreateTime(startList));
-                    diskWriteTimeCache.put(competitionId, Files.getLastModifiedTime(cached));
+                    createTimeCache.put(key, extractCreateTime(startList));
+                    diskWriteTimeCache.put(key, Files.getLastModifiedTime(cached));
                     return startList;
                 }
             }
 
-            StartList startList = downloadStartList(competitionId);
+            StartList startList = downloadStartList(competitionId, stage);
             if (startList == null) {
                 return null;
             }
-            createTimeCache.put(competitionId, extractCreateTime(startList));
-            writeDiskCache(cacheFileName, startList);
+            createTimeCache.put(key, extractCreateTime(startList));
+            writeDiskCache(competitionId, stage, startList);
             return startList;
         } catch (IOException | JAXBException e) {
-            log.error("Failed to fetch start list for {}", competitionId, e);
+            log.error("Failed to fetch start list for {} stage {}", competitionId, stage, e);
             return null;
         }
     }
 
-    private StartList downloadStartList(String competitionId) {
+    private StartList downloadStartList(String competitionId, int stage) {
         CompetitionInfo competition = getOrienteeringEvents().stream()
                 .filter(c -> c.eventId().equals(competitionId))
                 .findFirst()
                 .orElse(null);
 
-        if (competition == null) {
-            return null;
-        }
-
+        // Stage 1 may have a server-provided URL in the events JSON; for stage > 1
+        // we always derive the URL from the IOF naming convention.
         String url;
-        if(competition.startListUrl() == null) {
-            // https://online.tulospalvelu.fi/tulokset-new/xml/startlist_2026_viking_1_iof.xml
-            url = BASE_URL + "/tulokset-new/xml/startlist_" + competition.eventId() + "_1_iof.xml";
-
-        } else {
+        if (stage == 1 && competition != null && competition.startListUrl() != null) {
             url = BASE_URL + competition.startListUrl();
+        } else {
+            // https://online.tulospalvelu.fi/tulokset-new/xml/startlist_2026_viking_1_iof.xml
+            url = BASE_URL + "/tulokset-new/xml/startlist_" + competitionId + "_" + stage + "_iof.xml";
         }
 
         try {
@@ -258,7 +278,7 @@ public class TulospalveluService {
                 return (StartList) jaxbContext.createUnmarshaller().unmarshal(is);
             }
         } catch (IOException | InterruptedException | JAXBException e) {
-            log.error("Failed to download start list for {}", competitionId, e);
+            log.error("Failed to download start list for {} stage {}", competitionId, stage, e);
             return null;
         }
     }
@@ -338,67 +358,38 @@ public class TulospalveluService {
         return startList.getCreateTime().toXMLFormat();
     }
 
-    private void writeDiskCache(String fileName, StartList startList) {
+    private void writeDiskCache(String competitionId, int stage, StartList startList) {
+        String fileName = cacheFileName(competitionId, stage);
         try {
             Files.createDirectories(CACHE_DIR);
             Path path = CACHE_DIR.resolve(fileName);
             jaxbContext.createMarshaller().marshal(startList, path.toFile());
-            diskWriteTimeCache.put(
-                    extractCompetitionIdFromFileName(fileName),
-                    Files.getLastModifiedTime(path));
+            diskWriteTimeCache.put(cacheKey(competitionId, stage), Files.getLastModifiedTime(path));
             log.info("Cached start list to {}", path);
         } catch (JAXBException | IOException e) {
             log.warn("Failed to write start list disk cache: {}", fileName, e);
         }
     }
 
-    private static String extractCompetitionIdFromFileName(String fileName) {
-        // "startlist_2026_viking.xml" → "2026_viking"
-        return fileName.replaceFirst("^startlist_", "").replaceFirst("\\.xml$", "");
-    }
-
-    private String fetchWithDiskCache(String fileName, String url)
-            throws IOException, InterruptedException {
-        Path cached = CACHE_DIR.resolve(fileName);
-        if (Files.exists(cached)) {
-            log.info("Loading from disk cache: {}", cached);
-            return Files.readString(cached);
-        }
-
-        log.info("Downloading from {}", url);
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .GET()
-                .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        String body = response.body();
-
-        Files.createDirectories(CACHE_DIR);
-        Files.writeString(cached, body);
-        log.info("Cached to {}", cached);
-
-        return body;
-    }
-
-    private void notifyStartListUpdated(String competitionId) {
+    private void notifyStartListUpdated(String competitionId, int stage) {
         for (var listener : startListUpdateListeners) {
             try {
-                listener.accept(competitionId);
+                listener.accept(competitionId, stage);
             } catch (Exception e) {
-                log.warn("Start list update listener failed for {}", competitionId, e);
+                log.warn("Start list update listener failed for {} stage {}", competitionId, stage, e);
             }
         }
     }
 
     /**
-     * Registers a listener that is called with the competitionId
+     * Registers a listener that is called with (competitionId, stage)
      * whenever a start list is refreshed with new data.
      */
-    public void addStartListUpdateListener(Consumer<String> listener) {
+    public void addStartListUpdateListener(BiConsumer<String, Integer> listener) {
         startListUpdateListeners.add(listener);
     }
 
-    public void removeStartListUpdateListener(Consumer<String> listener) {
+    public void removeStartListUpdateListener(BiConsumer<String, Integer> listener) {
         startListUpdateListeners.remove(listener);
     }
 

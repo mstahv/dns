@@ -90,7 +90,8 @@ public class MachineReadingService {
             if (competition == null || !competition.isEnabled()) {
                 continue;
             }
-            merged.putAll(startListLookupService.buildControlCardMap(competition.getCompetitionId()));
+            merged.putAll(startListLookupService.buildControlCardMap(
+                    competition.getCompetitionId(), competition.getStage()));
         }
         return merged;
     }
@@ -134,11 +135,12 @@ public class MachineReadingService {
             }
 
             String competitionId = competition.getCompetitionId();
+            int stage = competition.getStage();
             Optional<RunnerInfo> runnerOpt;
             if (bib != null) {
-                runnerOpt = startListLookupService.findByBib(competitionId, bib);
+                runnerOpt = startListLookupService.findByBib(competitionId, stage, bib);
             } else if (cc != null) {
-                runnerOpt = startListLookupService.findByControlCard(competitionId, String.valueOf(cc));
+                runnerOpt = startListLookupService.findByControlCard(competitionId, stage, String.valueOf(cc));
             } else {
                 continue;
             }
@@ -195,7 +197,7 @@ public class MachineReadingService {
                 });
 
         Optional<RunnerInfo> runnerOpt = startListLookupService.findByControlCard(
-                competition.getCompetitionId(), cc);
+                competition.getCompetitionId(), competition.getStage(), cc);
 
         var reading = new MachineReading();
         reading.setPassword(password);

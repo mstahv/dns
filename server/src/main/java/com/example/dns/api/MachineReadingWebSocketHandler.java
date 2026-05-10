@@ -201,9 +201,10 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
      * Finds all connected machines associated with that competition and pushes
      * updated data.
      */
-    private void onStartListUpdated(String competitionId) {
-        // Find which machines are connected and associated with this competition
+    private void onStartListUpdated(String competitionId, Integer stage) {
+        // Find which machines are connected and associated with this competition + stage
         Set<Long> affectedMachineIds = competitionRepository.findByCompetitionId(competitionId).stream()
+                .filter(c -> c.getStage() == stage)
                 .flatMap(c -> competitionMachineRepository.findByPassword(c.getPassword()).stream())
                 .filter(CompetitionMachine::isApproved)
                 .map(cm -> cm.getMachine().getId())
@@ -215,8 +216,8 @@ public class MachineReadingWebSocketHandler extends TextWebSocketHandler {
                 if (session != null && session.isOpen()) {
                     try {
                         sendStartListData(session, entry.getValue());
-                        log.info("Pushed updated start list to machine {} after IOF XML refresh (competitionId={})",
-                                entry.getValue().getMachineId(), competitionId);
+                        log.info("Pushed updated start list to machine {} after IOF XML refresh (competitionId={} stage={})",
+                                entry.getValue().getMachineId(), competitionId, stage);
                     } catch (IOException e) {
                         log.warn("Failed to push start list to machine {}",
                                 entry.getValue().getMachineId(), e);

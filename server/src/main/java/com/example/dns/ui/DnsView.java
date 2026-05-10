@@ -62,8 +62,9 @@ public class DnsView extends VerticalLayout {
 
     private String password;
     private String competitionId;
+    private int stage = 1;
     private SharedNumberSignal changeSignal;
-    private java.util.function.Consumer<String> startListListener;
+    private java.util.function.BiConsumer<String, Integer> startListListener;
 
     // All start times sorted, with their pending runner data
     private List<LocalTime> sortedTimes = List.of();
@@ -118,13 +119,13 @@ public class DnsView extends VerticalLayout {
             return;
         }
         this.password = password;
-        this.competitionId = competitionRepository.findById(password)
-                .map(c -> c.getCompetitionId())
-                .orElse(password);
+        var competition = competitionRepository.findById(password).orElse(null);
+        this.competitionId = competition != null ? competition.getCompetitionId() : password;
+        this.stage = competition != null ? competition.getStage() : 1;
         removeAll();
         cardsByBib.clear();
 
-        StartList startList = tulospalveluService.getStartList(competitionId);
+        StartList startList = tulospalveluService.getStartList(competitionId, stage);
         if (startList == null) {
             return;
         }
@@ -621,7 +622,7 @@ public class DnsView extends VerticalLayout {
         if (changeSignal != null) {
             ElementEffect.effect(getElement(), () -> {
                 changeSignal.get();
-                getUI().ifPresent(currentUi -> currentUi.access(this::syncCardsFromSignal));
+                syncCardsFromSignal();
             });
         }
 
@@ -630,8 +631,8 @@ public class DnsView extends VerticalLayout {
         clock.addMinuteChangeListener(this::checkAutoAdvance);
         findAncestor(TopLayout.class).addNavbarHelper(clock);
 
-        startListListener = updatedCompetitionId -> {
-            if (updatedCompetitionId.equals(competitionId)) {
+        startListListener = (updatedCompetitionId, updatedStage) -> {
+            if (updatedCompetitionId.equals(competitionId) && updatedStage == stage) {
                 getUI().ifPresent(ui -> ui.access(() -> {
                     // Save navigation state before rebuild
                     LocalTime savedSlotTime = (currentIndex >= 0 && currentIndex < sortedTimes.size())

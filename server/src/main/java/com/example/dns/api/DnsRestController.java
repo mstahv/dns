@@ -79,9 +79,10 @@ public class DnsRestController {
         }
 
         String competitionId = competition.get().getCompetitionId();
+        int stage = competition.get().getStage();
         Set<LocalTime> requestedTimes = parseTimesParam(times);
 
-        StartList startList = tulospalveluService.getStartList(competitionId);
+        StartList startList = tulospalveluService.getStartList(competitionId, stage);
         if (startList == null) {
             return ResponseEntity.ok("");
         }

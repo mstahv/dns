@@ -12,6 +12,7 @@ import com.vaadin.flow.component.html.H2;
 import com.vaadin.flow.component.notification.Notification;
 import com.vaadin.flow.component.orderedlayout.VerticalLayout;
 import com.vaadin.flow.component.page.WebStorage;
+import com.vaadin.flow.component.textfield.IntegerField;
 import com.vaadin.flow.component.textfield.PasswordField;
 import com.vaadin.flow.component.textfield.TextField;
 import com.vaadin.flow.router.BeforeEnterEvent;
@@ -99,14 +100,15 @@ public class MainView extends VerticalLayout {
 
     private class CreateCompetitionPanel extends VerticalLayout {
 
+        private final ComboBox<CompetitionInfo> combo = new ComboBox<>("Valitse kilpailu");
+        private final IntegerField stageField = new StageField();
+        private final TextField passwordField = new TextField("Keksi kisasalasana");
+
         CreateCompetitionPanel(CompetitionRepository repo,
                                TulospalveluService tulospalveluService) {
-            var combo = new ComboBox<CompetitionInfo>("Valitse kilpailu");
             combo.setItemLabelGenerator(CompetitionInfo::eventTitle);
             combo.setItems(tulospalveluService.getOrienteeringEvents());
             combo.setWidthFull();
-
-            var passwordField = new TextField("Keksi kisasalasana");
 
             var createButton = new Button("Luo kilpailu onlinestä...", e -> {
                 if (nameField.getValue().isBlank()) {
@@ -132,6 +134,8 @@ public class MainView extends VerticalLayout {
                 var competition = new Competition();
                 competition.setCompetitionId(selected.eventId());
                 competition.setPassword(password.trim());
+                Integer stage = stageField.getValue();
+                competition.setStage(stage != null && stage >= 1 ? stage : 1);
                 repo.save(competition);
 
                 saveUserName();
@@ -140,7 +144,17 @@ public class MainView extends VerticalLayout {
                 getUI().ifPresent(ui -> ui.navigate(DnsView.class)
                         .ifPresent(view -> view.setCompetition(password.trim())));
             });
-            add(combo, passwordField, createButton);
+            add(combo, stageField, passwordField, createButton);
+        }
+    }
+
+    private static class StageField extends IntegerField {
+        StageField() {
+            super("Osa (esim. 1=karsinta, 2=finaali)");
+            setValue(1);
+            setMin(1);
+            setStepButtonsVisible(true);
+            setHelperText("Useimmissa kisoissa 1");
         }
     }
 }

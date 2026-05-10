@@ -21,6 +21,9 @@ public class Competition implements Persistable<String> {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    @Column(nullable = false)
+    private int stage = 1;
+
     @Transient
     private boolean isNew = true;
 
@@ -61,5 +64,13 @@ public class Competition implements Persistable<String> {
 
     public void setEnabled(boolean enabled) {
         this.enabled = enabled;
+    }
+
+    public int getStage() {
+        return stage;
+    }
+
+    public void setStage(int stage) {
+        this.stage = stage;
     }
 }

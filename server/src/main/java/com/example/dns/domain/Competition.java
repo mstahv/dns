@@ -24,6 +24,14 @@ public class Competition implements Persistable<String> {
     @Column(nullable = false)
     private int stage = 1;
 
+    /**
+     * Optional direct URL to an IOF XML start list. When set, this overrides
+     * the URL constructed from competitionId + stage. Lets users register
+     * competitions hosted outside tulospalvelu.fi.
+     */
+    @Column(length = 1024)
+    private String startListUrl;
+
     @Transient
     private boolean isNew = true;
 
@@ -72,5 +80,13 @@ public class Competition implements Persistable<String> {
 
     public void setStage(int stage) {
         this.stage = stage;
+    }
+
+    public String getStartListUrl() {
+        return startListUrl;
+    }
+
+    public void setStartListUrl(String startListUrl) {
+        this.startListUrl = startListUrl;
     }
 }

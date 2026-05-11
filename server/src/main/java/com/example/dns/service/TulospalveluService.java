@@ -1,12 +1,17 @@
 package com.example.dns.service;
 
+import com.example.dns.domain.Competition;
+import com.example.dns.domain.CompetitionRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PostConstruct;
 import jakarta.xml.bind.JAXBContext;
 import jakarta.xml.bind.JAXBException;
 import org.orienteering.datastandard._3.PersonStart;
 import org.orienteering.datastandard._3.StartList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -48,12 +53,52 @@ public class TulospalveluService {
     private final Map<String, String> createTimeCache = new ConcurrentHashMap<>();
     private final Map<String, FileTime> diskWriteTimeCache = new ConcurrentHashMap<>();
     private final Set<String> locallyOverridden = ConcurrentHashMap.newKeySet();
+    /** Per (eventId, stage) override URL — used when a Competition was created
+     * via a direct IOF XML link instead of tulospalvelu.fi event lookup. */
+    private final Map<String, String> customUrls = new ConcurrentHashMap<>();
     private final List<BiConsumer<String, Integer>> startListUpdateListeners = new CopyOnWriteArrayList<>();
     private volatile List<CompetitionInfo> eventsCache;
     private volatile Instant eventsCacheTime;
 
+    @Autowired
+    @Lazy
+    private CompetitionRepository competitionRepository;
+
     public TulospalveluService() throws JAXBException {
         this.jaxbContext = JAXBContext.newInstance(StartList.class);
+    }
+
+    /**
+     * Restores customUrls from persisted Competition records on startup
+     * so that the scheduled refresh task can fetch URL-based start lists
+     * with the right URL even before any view has registered them.
+     */
+    @PostConstruct
+    void loadCustomUrls() {
+        for (Competition c : competitionRepository.findAll()) {
+            if (c.getStartListUrl() != null && !c.getStartListUrl().isBlank()) {
+                customUrls.put(cacheKey(c.getCompetitionId(), c.getStage()), c.getStartListUrl());
+            }
+        }
+        log.info("Loaded {} custom start list URLs", customUrls.size());
+    }
+
+    /**
+     * Registers (or clears) a custom URL for the given competition's
+     * (eventId, stage). Called when a Competition with a direct URL is
+     * created or updated, so subsequent downloads use the user-supplied URL.
+     */
+    public void registerCustomUrl(Competition competition) {
+        String key = cacheKey(competition.getCompetitionId(), competition.getStage());
+        String url = competition.getStartListUrl();
+        if (url != null && !url.isBlank()) {
+            customUrls.put(key, url);
+        } else {
+            customUrls.remove(key);
+        }
+        // Invalidate caches so the next read uses the new URL
+        startListCache.remove(key);
+        createTimeCache.remove(key);
     }
 
     @SuppressWarnings("unchecked")
@@ -252,19 +297,25 @@ public class TulospalveluService {
     }
 
     private StartList downloadStartList(String competitionId, int stage) {
-        CompetitionInfo competition = getOrienteeringEvents().stream()
-                .filter(c -> c.eventId().equals(competitionId))
-                .findFirst()
-                .orElse(null);
-
-        // Stage 1 may have a server-provided URL in the events JSON; for stage > 1
-        // we always derive the URL from the IOF naming convention.
+        String customUrl = customUrls.get(cacheKey(competitionId, stage));
         String url;
-        if (stage == 1 && competition != null && competition.startListUrl() != null) {
-            url = BASE_URL + competition.startListUrl();
+        if (customUrl != null && !customUrl.isBlank()) {
+            // User-supplied direct URL — used as-is (may point outside tulospalvelu.fi)
+            url = customUrl;
         } else {
-            // https://online.tulospalvelu.fi/tulokset-new/xml/startlist_2026_viking_1_iof.xml
-            url = BASE_URL + "/tulokset-new/xml/startlist_" + competitionId + "_" + stage + "_iof.xml";
+            CompetitionInfo competition = getOrienteeringEvents().stream()
+                    .filter(c -> c.eventId().equals(competitionId))
+                    .findFirst()
+                    .orElse(null);
+
+            // Stage 1 may have a server-provided URL in the events JSON; for stage > 1
+            // we always derive the URL from the IOF naming convention.
+            if (stage == 1 && competition != null && competition.startListUrl() != null) {
+                url = BASE_URL + competition.startListUrl();
+            } else {
+                // https://online.tulospalvelu.fi/tulokset-new/xml/startlist_2026_viking_1_iof.xml
+                url = BASE_URL + "/tulokset-new/xml/startlist_" + competitionId + "_" + stage + "_iof.xml";
+            }
         }
 
         try {
@@ -400,5 +451,6 @@ public class TulospalveluService {
         createTimeCache.clear();
         diskWriteTimeCache.clear();
         locallyOverridden.clear();
+        customUrls.clear();
     }
 }

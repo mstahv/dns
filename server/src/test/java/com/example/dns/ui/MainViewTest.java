@@ -1,7 +1,9 @@
 package com.example.dns.ui;
 
 import com.example.dns.TestcontainersConfiguration;
+import com.example.dns.domain.Competition;
 import com.example.dns.domain.CompetitionRepository;
+import com.example.dns.service.TulospalveluService;
 import com.vaadin.browserless.VaadinTestApplicationContext;
 import com.vaadin.browserless.VaadinTestUiContext;
 import com.vaadin.browserless.internal.Routes;
@@ -29,6 +31,9 @@ class MainViewTest {
 
     @Autowired
     CompetitionRepository competitionRepository;
+
+    @Autowired
+    TulospalveluService tulospalveluService;
 
     VaadinTestApplicationContext app;
 
@@ -120,5 +125,51 @@ class MainViewTest {
         assertEquals("2026_smsprint", loaded.getCompetitionId());
 
         competitionRepository.deleteById("smfinaali");
+    }
+
+    @Test
+    void urlCreationPanelIsVisible() {
+        VaadinTestUiContext user = app.newUser().newWindow();
+        user.navigate(MainView.class);
+
+        TextField urlField = user.get(TextField.class).all().stream()
+                .filter(f -> "IOF XML -tiedoston URL".equals(f.getLabel()))
+                .findFirst().orElseThrow(() ->
+                        new AssertionError("URL-based creation panel should render an URL field"));
+        assertEquals("", urlField.getValue(),
+                "URL field should be empty by default");
+
+        Button createButton = user.get(Button.class).all().stream()
+                .filter(b -> "Luo kilpailu linkistä".equals(b.getText()))
+                .findFirst().orElseThrow(() ->
+                        new AssertionError("URL-based create button should be present"));
+        assertTrue(createButton.isEnabled(),
+                "URL-based create button should be enabled");
+    }
+
+    @Test
+    void competitionPersistsStartListUrlAndRegisters() {
+        String pw = "urlikisa";
+        String customUrl = "https://example.test/startlist_my_event.xml";
+        competitionRepository.deleteById(pw);
+
+        var competition = new Competition();
+        competition.setCompetitionId("my_event");
+        competition.setPassword(pw);
+        competition.setStartListUrl(customUrl);
+        competitionRepository.save(competition);
+
+        var loaded = competitionRepository.findById(pw).orElseThrow();
+        assertEquals(customUrl, loaded.getStartListUrl(),
+                "startListUrl should round-trip through the database");
+
+        // Register and confirm idempotency
+        tulospalveluService.registerCustomUrl(loaded);
+
+        // Re-registering with a cleared URL should remove the override
+        loaded.setStartListUrl(null);
+        tulospalveluService.registerCustomUrl(loaded);
+
+        competitionRepository.deleteById(pw);
     }
 }

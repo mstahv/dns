@@ -62,6 +62,10 @@ public class MainView extends VerticalLayout {
         add(new H2("Luo uusi kilpailu"));
 
         add(new CreateCompetitionPanel(competitionRepository, tulospalveluService));
+
+        add(new H2("…tai luo IOF XML -linkillä"));
+
+        add(new CreateFromUrlPanel(competitionRepository, tulospalveluService));
     }
 
     private void saveUserName() {
@@ -155,6 +159,85 @@ public class MainView extends VerticalLayout {
             setMin(1);
             setStepButtonsVisible(true);
             setHelperText("Useimmissa kisoissa 1");
+        }
+    }
+
+    /**
+     * Alternative creation flow: user pastes a direct URL to an IOF XML
+     * start list (any host) plus a short identifier used as competitionId.
+     * The URL is stored on the Competition and registered with
+     * TulospalveluService so the same caching/refresh pipeline works.
+     */
+    private class CreateFromUrlPanel extends VerticalLayout {
+
+        private final TextField urlField = new UrlField();
+        private final TextField idField = new IdField();
+        private final TextField passwordField = new TextField("Keksi kisasalasana");
+
+        CreateFromUrlPanel(CompetitionRepository repo,
+                           TulospalveluService tulospalveluService) {
+
+            var createButton = new Button("Luo kilpailu linkistä", e -> {
+                if (nameField.getValue().isBlank()) {
+                    Notification.show("Syötä nimesi");
+                    return;
+                }
+                String url = trimmedOrNull(urlField.getValue());
+                if (url == null) {
+                    Notification.show("Syötä XML-tiedoston URL");
+                    return;
+                }
+                String id = trimmedOrNull(idField.getValue());
+                if (id == null) {
+                    Notification.show("Syötä lyhyt tunniste kisalle");
+                    return;
+                }
+                String password = trimmedOrNull(passwordField.getValue());
+                if (password == null) {
+                    Notification.show("Syötä salasana");
+                    return;
+                }
+                if (repo.findById(password).isPresent()) {
+                    Notification.show("Salasana on jo käytössä");
+                    return;
+                }
+
+                var competition = new Competition();
+                competition.setCompetitionId(id);
+                competition.setPassword(password);
+                competition.setStartListUrl(url);
+                repo.save(competition);
+
+                tulospalveluService.registerCustomUrl(competition);
+
+                saveUserName();
+                savePassword(password);
+                userSession.setPassword(password);
+                getUI().ifPresent(ui -> ui.navigate(DnsView.class)
+                        .ifPresent(view -> view.setCompetition(password)));
+            });
+            add(urlField, idField, passwordField, createButton);
+        }
+
+        private static String trimmedOrNull(String value) {
+            if (value == null) return null;
+            String t = value.trim();
+            return t.isEmpty() ? null : t;
+        }
+    }
+
+    private static class UrlField extends TextField {
+        UrlField() {
+            super("IOF XML -tiedoston URL");
+            setWidthFull();
+            setPlaceholder("https://example.com/startlist.xml");
+        }
+    }
+
+    private static class IdField extends TextField {
+        IdField() {
+            super("Kisan tunniste");
+            setHelperText("Lyhyt id (esim. 2026_kuntorastit). Käytetään cachen avaimena.");
         }
     }
 }
